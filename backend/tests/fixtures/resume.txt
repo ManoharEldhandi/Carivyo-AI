@@ -1,0 +1,19 @@
+Avery Candidate
+avery.candidate@example.com | +91 90000 00000 | https://github.com/avery-candidate
+
+SUMMARY
+Software engineer focused on backend and AI systems.
+
+SKILLS
+Python, FastAPI, Java, TypeScript, React, SQL, PostgreSQL, Docker, AWS, Git, Playwright, RAG, LLM
+
+EXPERIENCE
+Built Python and FastAPI services with PostgreSQL for a production-oriented application.
+Developed REST APIs and automated tests using GitHub Actions and Playwright.
+
+PROJECTS
+Created a RAG assistant using Python, vector retrieval, and an evidence-grounded answer pipeline.
+Built a React and TypeScript dashboard connected to secure backend APIs.
+
+EDUCATION
+Bachelor of Technology in Computer Science.

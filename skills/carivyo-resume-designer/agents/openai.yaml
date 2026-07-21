@@ -1,0 +1,5 @@
+interface:
+  display_name: "Carivyo Resume Designer"
+  short_description: "Tailor truthful, evidence-backed resumes"
+  brand_color: "#4F46E5"
+  default_prompt: "Use $carivyo-resume-designer to tailor this resume to the selected job using only the isolated approved evidence package."

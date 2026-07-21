@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install --yes poppler-utils ripgrep
+
+      - name: Install backend
+        run: python -m pip install --upgrade pip && python -m pip install -e "backend[dev]"
+
+      - name: Install frontend
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run backend tests
+        run: pytest backend/tests
+
+      - name: Run frontend tests
+        working-directory: frontend
+        run: npm test -- --run
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
+      - name: Verify dependencies
+        run: |
+          python -m pip check
+          cd frontend
+          npm audit --omit=dev
+
+      - name: Validate resume skill package
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          root = Path("skills/carivyo-resume-designer")
+          skill = (root / "SKILL.md").read_text()
+          match = re.match(r"^---\n(.*?)\n---", skill, re.S)
+          assert match, "SKILL.md frontmatter is missing"
+          frontmatter = match.group(1)
+          assert re.search(r"^name:\s*[\"']?carivyo-resume-designer[\"']?\s*$", frontmatter, re.M)
+          assert re.search(r"^description:\s*\S", frontmatter, re.M), "Skill description is required"
+          assert (root / "agents/openai.yaml").is_file()
+          assert (root / "scripts/validate_run.py").is_file()
+          PY
+
+      - name: Reject personal context in the general product
+        run: |
+          ! rg --ignore-case "manohar|eldhandi" \
+            backend/app \
+            frontend/src \
+            skills/carivyo-resume-designer

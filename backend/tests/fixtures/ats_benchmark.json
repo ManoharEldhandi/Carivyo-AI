@@ -1,0 +1,62 @@
+{
+  "benchmark_version": "synthetic-v1",
+  "cases": [
+    {
+      "id": "strong_backend",
+      "resume_text": "AVERY CANDIDATE\nBackend Engineer\navery.candidate@example.com | +91 90000 00000\nhttps://www.linkedin.com/in/avery-candidate | https://github.com/avery-candidate\n\nSUMMARY\nBackend engineer building reliable APIs and data systems.\n\nSKILLS\nPython, FastAPI, PostgreSQL, Redis, Docker, Kubernetes, AWS, REST\n\nEXPERIENCE\nBackend Engineer, Example Labs | Jan 2024 - Present\n- Built Python and FastAPI services that handled 2 million requests per month.\n- Reduced PostgreSQL query latency by 42% through indexes and cache-aware access.\n- Led a 4-engineer reliability project using Docker, Kubernetes, Redis, and AWS.\n- Collaborated with stakeholders and mentored 2 teammates on production reviews.\n\nPROJECTS\n- Designed a REST API deployment pipeline that cut release time from 40 to 12 minutes.\n\nEDUCATION\nBachelor of Technology in Computer Science | 2020 - 2024",
+      "job_description": "Backend Engineer\nBuild Python and FastAPI services using PostgreSQL, Redis, Docker, Kubernetes, and AWS. Design REST APIs, collaborate with stakeholders, own production reliability, and mentor teammates.",
+      "metadata": {
+        "filename": "Avery_Candidate_Resume.pdf",
+        "file_format": "pdf",
+        "size_bytes": 180000,
+        "page_count": 1,
+        "column_count": 1,
+        "has_tables": false,
+        "has_text_boxes": false,
+        "image_only": false,
+        "job_title": "Backend Engineer",
+        "linkedin_url": "https://www.linkedin.com/in/avery-candidate",
+        "extracted_char_count": 1100,
+        "source_char_count": 1100
+      },
+      "labels": {
+        "file_format_size": false,
+        "professional_email": false,
+        "essential_sections": false,
+        "contact": false,
+        "parse_rate": false,
+        "quantified_impact": false,
+        "hard_skills": false
+      }
+    },
+    {
+      "id": "weak_unstructured",
+      "resume_text": "Candidate\ncandidate@example.com\n\nOBJECTIVE\nI want a job and I am responsible for work.\n\nEXPERIENCE\nResponsible for completing assigned engineering work.\nResponsible for completing assigned engineering work.\nResponsible for completing assigned engineering work.\nResponsible for completing assigned engineering work.\nResponsible for completing assigned engineering work.\nResponsible for completing assigned engineering work.\n\nEDUCATION\nCollege",
+      "job_description": "Backend Engineer\nRequires Python, FastAPI, PostgreSQL, Docker, AWS, REST API design, ownership, and measurable delivery impact.",
+      "metadata": {
+        "filename": "resume final final.pdf",
+        "file_format": "pdf",
+        "size_bytes": 9000000,
+        "page_count": 1,
+        "column_count": 3,
+        "has_tables": true,
+        "has_text_boxes": true,
+        "image_only": false,
+        "job_title": "Backend Engineer",
+        "linkedin_url": "https://www.linkedin.com/in/candidate",
+        "extracted_char_count": 175,
+        "source_char_count": 175
+      },
+      "labels": {
+        "file_format_size": true,
+        "design": true,
+        "contact": true,
+        "quantified_impact": true,
+        "repetition": true,
+        "hard_skills": true,
+        "action_verbs": true,
+        "skills_evidence": true
+      }
+    }
+  ]
+}

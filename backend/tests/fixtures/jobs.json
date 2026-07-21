@@ -1,0 +1,41 @@
+[
+  {
+    "connector_id": "fixture-greenhouse",
+    "external_id": "gh-101",
+    "source_family": "greenhouse",
+    "company": "Acme Payments",
+    "title": "Backend Software Engineer",
+    "location": "Bengaluru, India",
+    "work_mode": "hybrid",
+    "posted_hours_ago": 5,
+    "posted_semantics": "first_published",
+    "apply_url": "https://jobs.example.com/acme/gh-101",
+    "description": "Build Python and FastAPI services, design REST APIs, work with PostgreSQL, Docker, and AWS. Candidates should have 0-2 years of software engineering experience and strong backend fundamentals."
+  },
+  {
+    "connector_id": "fixture-lever",
+    "external_id": "lever-202",
+    "source_family": "lever",
+    "company": "Orbit AI",
+    "title": "AI/LLM Engineer",
+    "location": "Remote India",
+    "work_mode": "remote",
+    "posted_hours_ago": 18,
+    "posted_semantics": "createdAt",
+    "apply_url": "https://jobs.example.com/orbit/lever-202",
+    "description": "Develop RAG and LLM applications using Python, FastAPI, vector retrieval, Docker, and cloud infrastructure. Experience building AI agents and reliable evaluation workflows is preferred."
+  },
+  {
+    "connector_id": "fixture-ashby",
+    "external_id": "ashby-303",
+    "source_family": "ashby",
+    "company": "Nova Systems",
+    "title": "Software Engineer I",
+    "location": "Hyderabad, India",
+    "work_mode": "onsite",
+    "posted_hours_ago": 31,
+    "posted_semantics": "publishedAt",
+    "apply_url": "https://jobs.example.com/nova/ashby-303",
+    "description": "Design and develop software in Python or Java, contribute to APIs, SQL systems, automated tests, Git workflows, and production support. This is an early-career engineering role."
+  }
+]
