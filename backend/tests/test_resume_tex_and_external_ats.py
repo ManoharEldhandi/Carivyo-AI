@@ -37,12 +37,12 @@ def test_tex_source_round_trip_rebuilds_exact_current_variant(client):
     source = source_response.json()
     assert source["language"] == "latex"
     assert source["editable"] is True
-    assert "\\documentclass[10pt,a4paper]" in source["source"]
+    assert "\\documentclass[11pt,a4paper]" in source["source"]
     assert "ResumeNavy" in source["source"]
 
     previous_pdf = Path(run["result"]["artifacts"]["pdf"])
     previous_source = Path(run["result"]["artifacts"]["editable_source"])
-    edited = source["source"].replace("margin=0.52in", "margin=0.55in", 1)
+    edited = source["source"].replace("margin=0.58in", "margin=0.60in", 1)
     response = client.put(
         f"/api/resume-runs/{run['id']}/source",
         json={"source": edited, "instruction": "Increase the page margin slightly."},

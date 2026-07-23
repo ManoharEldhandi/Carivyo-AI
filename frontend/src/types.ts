@@ -88,6 +88,14 @@ export interface Job {
   location: string;
   work_mode?: string;
   employment_type?: string;
+  salary?: {
+    min?: number;
+    max?: number;
+    currency?: string;
+    interval?: string;
+    period?: string;
+    text?: string;
+  } | null;
   posted_at?: string;
   apply_url: string;
   source_url: string;
@@ -112,8 +120,11 @@ export interface SearchContract {
   excluded_keywords: string[];
   excluded_locations: string[];
   freshness_hours: number;
-  location_policy: "strict" | string;
-  role_policy: "strict" | string;
+  location_policy: "preference_order" | "strict" | string;
+  role_policy: "expanded_early_career" | "strict" | string;
+  freshness_policy?: "ranking" | "strict" | string;
+  metadata_policy?: "include_unknown" | "strict" | string;
+  seniority_policy?: "early_career" | "strict" | string;
   source_policy: "official_direct" | string;
   temporary_override?: {
     instruction: string;
@@ -181,7 +192,7 @@ export interface PreferenceSettings {
   seniority_tolerance: string;
   excluded_keywords: string[];
   excluded_locations: string[];
-  location_policy: "strict";
+  location_policy: "preference_order" | "strict";
   freshness_hours: number;
 }
 
@@ -545,6 +556,49 @@ export interface ResumeRun {
     validation: Record<string, unknown>;
     ats_analysis: ATSAnalysis;
     ats_comparison: ATSComparison;
+    section_inventory?: Array<{
+      id: string;
+      label: string;
+      expected: boolean;
+      present: boolean;
+      claim_count: number;
+    }>;
+    hiring_evaluation?: {
+      status: "complete" | "unavailable" | "failed" | "disabled";
+      version?: string;
+      advisory: true;
+      authoritative: false;
+      provider?: string;
+      model?: string | null;
+    score?: number;
+    max_score?: number;
+    raw_model_score?: number;
+    deterministic_ats_score?: number;
+    score_basis?: string;
+    verdict?: string;
+      reason?: string;
+      disclaimer?: string;
+      dimensions: Array<{
+        id: string;
+        score: number;
+        max: number;
+        evidence_ids: string[];
+        requirement_indices: number[];
+        rationale: string;
+      }>;
+      strengths: string[];
+      concerns: string[];
+      recommended_changes: string[];
+      interview_probes: string[];
+      missing_sections: string[];
+      usage?: {
+        input_tokens: number;
+        output_tokens: number;
+        cache_read_tokens: number;
+        kind: string;
+        latency_ms?: number;
+      };
+    };
     remaining_gaps: string[];
     interview_probes: string[];
     artifacts: Record<string, string>;

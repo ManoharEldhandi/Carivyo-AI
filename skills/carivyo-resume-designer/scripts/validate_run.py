@@ -30,6 +30,7 @@ CRITICAL_VALIDATION_FLAGS = (
     "links_ok",
     "identity_ok",
     "section_order_ok",
+    "section_completeness_ok",
     "visual_ok",
     "evidence_ok",
 )
@@ -117,6 +118,8 @@ def validate(run_directory: Path) -> list[str]:
     if validation != report:
         errors.append("result validation does not match reports/validation.json")
     for flag in CRITICAL_VALIDATION_FLAGS:
+        if flag == "section_completeness_ok" and spec.get("skill_version") != "5.0.0":
+            continue
         if validation.get(flag) is not True:
             errors.append(f"critical validation gate failed: {flag}")
     if validation.get("change_budget_applicable"):

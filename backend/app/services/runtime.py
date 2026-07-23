@@ -154,9 +154,7 @@ class RuntimeGateway:
         try:
             response = httpx.get("http://127.0.0.1:11434/api/tags", timeout=2)
             response.raise_for_status()
-            models = [
-                item.get("name") for item in response.json().get("models", []) if item.get("name")
-            ]
+            models = self._local_ollama_model_names(response.json())
             return RuntimeProvider(
                 id="ollama",
                 name="Ollama",
@@ -174,6 +172,12 @@ class RuntimeGateway:
                         profile="local",
                         recommended=index == 0,
                         detail="Runs through the local Ollama service.",
+                        reasoning_efforts=["none"],
+                        use_cases=[
+                            "chat",
+                            "resume_review",
+                            "hiring_manager_simulation",
+                        ],
                     )
                     for index, model in enumerate(models)
                 ],
@@ -196,11 +200,26 @@ class RuntimeGateway:
             (model.id for model in catalog if model.id == self.settings.codex_model),
             next(model.id for model in catalog if model.recommended),
         )
-        default = {
-            "provider": "codex",
-            "model": configured_default,
-            "reasoning_effort": "low",
-        }
+        local_models = self._available_local_ollama_models()
+        configured_local = self.settings.ollama_model
+        local_default = (
+            configured_local
+            if configured_local in local_models
+            else (local_models[0] if local_models else None)
+        )
+        default = (
+            {
+                "provider": "ollama",
+                "model": local_default,
+                "reasoning_effort": "none",
+            }
+            if local_default
+            else {
+                "provider": "codex",
+                "model": configured_default,
+                "reasoning_effort": "low",
+            }
+        )
         if not self.database:
             return default
         row = self.database.fetch_one(
@@ -301,7 +320,7 @@ class RuntimeGateway:
 
     def _run_ollama(self, prompt: str, model: Optional[str]) -> Dict[str, Any]:
         tags = httpx.get("http://127.0.0.1:11434/api/tags", timeout=3).json()
-        models = [item.get("name") for item in tags.get("models", []) if item.get("name")]
+        models = self._local_ollama_model_names(tags)
         if not models:
             raise RuntimeUnavailable("Ollama has no installed model")
         selected_model = model or models[0]
@@ -335,6 +354,120 @@ class RuntimeGateway:
             else "estimated",
             "latency_ms": int((time.perf_counter() - started) * 1000),
         }
+
+    def run_structured(
+        self,
+        prompt: str,
+        schema: Dict[str, Any],
+        *,
+        provider: str = "ollama",
+        model: Optional[str] = None,
+        temperature: float = 0.0,
+        max_output_tokens: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Run a bounded JSON-schema request through an on-device Ollama model."""
+
+        if provider != "ollama":
+            raise RuntimeUnavailable(
+                "Structured hiring evaluation is restricted to the local Ollama adapter"
+            )
+        if not schema:
+            raise RuntimeUnavailable("Structured output requires a validation schema")
+        local_models = self._available_local_ollama_models()
+        if not local_models:
+            raise RuntimeUnavailable("Ollama has no installed on-device model")
+        selected_model = model or (
+            self.selection()["model"]
+            if self.selection().get("provider") == "ollama"
+            else local_models[0]
+        )
+        if selected_model not in local_models:
+            raise RuntimeUnavailable(
+                f"The selected Ollama model {selected_model} is not installed on device"
+            )
+        started = time.perf_counter()
+        response = httpx.post(
+            "http://127.0.0.1:11434/api/chat",
+            json={
+                "model": selected_model,
+                "stream": False,
+                "messages": [{"role": "user", "content": prompt}],
+                # JSON mode is materially faster across small local models than
+                # grammar-compiling a large nested schema. The caller still
+                # validates the decoded object against the supplied schema model.
+                "format": "json",
+                "options": {
+                    "temperature": temperature,
+                    "num_ctx": 2048,
+                    "num_predict": min(
+                        self.settings.max_chat_output_tokens,
+                        max_output_tokens or 260,
+                    ),
+                },
+            },
+            timeout=self.settings.runtime_timeout_seconds,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        content = ((payload.get("message") or {}).get("content") or "").strip()
+        try:
+            data = json.loads(content)
+        except json.JSONDecodeError as exc:
+            raise RuntimeUnavailable(
+                "The local model returned invalid structured JSON"
+            ) from exc
+        return {
+            "provider": "ollama",
+            "model": payload.get("model") or selected_model,
+            "data": data,
+            "content": content,
+            "input_tokens": int(
+                payload.get("prompt_eval_count") or estimate_tokens(prompt)
+            ),
+            "output_tokens": int(
+                payload.get("eval_count") or estimate_tokens(content)
+            ),
+            "cache_read_tokens": 0,
+            "usage_kind": (
+                "measured"
+                if payload.get("prompt_eval_count") is not None
+                else "estimated"
+            ),
+            "latency_ms": int((time.perf_counter() - started) * 1000),
+        }
+
+    def local_model(self) -> Optional[str]:
+        models = self._available_local_ollama_models()
+        if self.settings.ollama_model in models:
+            return self.settings.ollama_model
+        return models[0] if models else None
+
+    def _available_local_ollama_models(self) -> List[str]:
+        try:
+            response = httpx.get("http://127.0.0.1:11434/api/tags", timeout=2)
+            response.raise_for_status()
+            return self._local_ollama_model_names(response.json())
+        except (httpx.HTTPError, ValueError, TypeError):
+            return []
+
+    @staticmethod
+    def _local_ollama_model_names(payload: Dict[str, Any]) -> List[str]:
+        """Exclude Ollama cloud pointers from paths labelled as on-device AI."""
+
+        result: List[str] = []
+        for item in payload.get("models", []):
+            if not isinstance(item, dict):
+                continue
+            name = item.get("name")
+            if (
+                not isinstance(name, str)
+                or not name
+                or item.get("remote_host")
+                or item.get("remote_model")
+            ):
+                continue
+            result.append(name)
+        return result
 
     def _run_codex(
         self,

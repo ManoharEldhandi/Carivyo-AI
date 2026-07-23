@@ -423,6 +423,220 @@ class SmartRecruitersConnector(OfficialConnector):
         )
 
 
+class SalesforceConnector(OfficialConnector):
+    """Salesforce's official, timestamped public careers export."""
+
+    family = "company_portal"
+    source_domain = "a.sfdcstatic.com"
+    parser_version = "1.0"
+
+    async def fetch(self, client: httpx.AsyncClient) -> ConnectorFetchResult:
+        payload = await self.request_json(client, self.config["feed_url"])
+        entries = payload.get("Report_Entry", []) if isinstance(payload, dict) else []
+        jobs: List[JobCandidate] = []
+        invalid = 0
+        for item in entries if isinstance(entries, list) else []:
+            if not isinstance(item, dict):
+                invalid += 1
+                continue
+            external_id = str(item.get("Job_Requisition_Ref_ID") or "").strip()
+            apply_url = str(item.get("External_Job_Posting_Site") or "").strip()
+            if not external_id or not apply_url:
+                invalid += 1
+                continue
+            location = str(
+                item.get("Job_Requisition_Primary_Location") or "Unspecified"
+            )
+            posted = item.get("External_Job_Posting_Start_Date")
+            jobs.append(
+                JobCandidate(
+                    connector_id=self.connector_id,
+                    external_id=external_id,
+                    title=item.get("Job_Posting_Title") or "Untitled role",
+                    company=self.company,
+                    description=clean_description(item.get("Job_Description")),
+                    location=location,
+                    work_mode=infer_work_mode(location),
+                    employment_type=item.get("Time_Type") or item.get("Employee_Type"),
+                    posted_at=parse_iso(posted),
+                    posted_semantics=(
+                        "External_Job_Posting_Start_Date" if posted else None
+                    ),
+                    apply_url=apply_url,
+                    source_url=apply_url,
+                    source_family=self.family,
+                    raw=item,
+                )
+            )
+        complete = invalid == 0 and isinstance(entries, list)
+        return ConnectorFetchResult(
+            candidates=jobs,
+            complete=complete,
+            metadata={
+                "feed_timestamp": payload.get("Fetch_Timestamp")
+                if isinstance(payload, dict)
+                else None,
+                "reported_count": payload.get("Count")
+                if isinstance(payload, dict)
+                else None,
+                "invalid_entries": invalid,
+                "absence_authoritative": complete,
+            },
+        )
+
+
+class GoldmanSachsConnector(OfficialConnector):
+    """Goldman Sachs Higher official role-search GraphQL connector."""
+
+    family = "company_portal"
+    source_domain = "api-higher.gs.com"
+    parser_version = "1.0"
+    query = """
+        query GetRoles($searchQueryInput: RoleSearchQueryInput!) {
+          roleSearch(searchQueryInput: $searchQueryInput) {
+            totalCount
+            items {
+              roleId corporateTitle jobTitle jobFunction status division skills
+              locations { primary state country city }
+              jobType { code description }
+              externalSource { sourceId }
+            }
+          }
+        }
+    """
+
+    async def fetch(self, client: httpx.AsyncClient) -> ConnectorFetchResult:
+        page_size = max(1, min(500, int(self.config.get("page_size", 250))))
+        max_pages = max(1, min(10, int(self.config.get("max_pages", 4))))
+        items: List[Dict[str, Any]] = []
+        total_count: Optional[int] = None
+        for page_number in range(max_pages):
+            response = await client.post(
+                self.config["graphql_url"],
+                headers={
+                    "Accept": "application/json",
+                    "Content-Type": "application/json",
+                    "Origin": "https://higher.gs.com",
+                    "User-Agent": "Carivyo/0.1 local job verifier",
+                },
+                json={
+                    "operationName": "GetRoles",
+                    "variables": {
+                        "searchQueryInput": {
+                            "page": {
+                                "pageSize": page_size,
+                                "pageNumber": page_number,
+                            },
+                            "sort": {
+                                "sortStrategy": "RELEVANCE",
+                                "sortOrder": "DESC",
+                            },
+                            "filters": [
+                                {
+                                    "filterCategoryType": "LOCATION",
+                                    "filters": [
+                                        {
+                                            "filter": self.config.get(
+                                                "country", "India"
+                                            ),
+                                            "subFilters": [],
+                                        }
+                                    ],
+                                }
+                            ],
+                            "experiences": ["EARLY_CAREER", "PROFESSIONAL"],
+                            "searchTerm": "",
+                        }
+                    },
+                    "query": self.query,
+                },
+            )
+            response.raise_for_status()
+            payload = response.json()
+            if payload.get("errors"):
+                raise ConnectorError(f"{self.name} GraphQL returned errors")
+            result = ((payload.get("data") or {}).get("roleSearch") or {})
+            page_items = result.get("items") or []
+            if not isinstance(page_items, list):
+                raise ConnectorError(f"{self.name} returned invalid role items")
+            items.extend(item for item in page_items if isinstance(item, dict))
+            try:
+                total_count = int(result.get("totalCount"))
+            except (TypeError, ValueError):
+                total_count = None
+            if len(items) >= (total_count or 0) or len(page_items) < page_size:
+                break
+
+        jobs: List[JobCandidate] = []
+        for item in items:
+            role_id = str(item.get("roleId") or "").strip()
+            if not role_id or str(item.get("status") or "").casefold() == "closed":
+                continue
+            locations = item.get("locations") or []
+            location_item = next(
+                (
+                    value
+                    for value in locations
+                    if isinstance(value, dict) and value.get("primary")
+                ),
+                next((value for value in locations if isinstance(value, dict)), {}),
+            )
+            location = ", ".join(
+                dict.fromkeys(
+                    str(location_item.get(key) or "").strip()
+                    for key in ("city", "state", "country")
+                    if str(location_item.get(key) or "").strip()
+                )
+            ) or "Unspecified"
+            skills = item.get("skills") or []
+            if not isinstance(skills, list):
+                skills = [str(skills)]
+            description = clean_description(
+                "\n".join(
+                    [
+                        f"Corporate title: {item.get('corporateTitle') or ''}",
+                        f"Division: {item.get('division') or ''}",
+                        f"Job function: {item.get('jobFunction') or ''}",
+                        "Skills: " + ", ".join(str(value) for value in skills),
+                    ]
+                )
+            )
+            url = f"https://higher.gs.com/roles/{role_id}"
+            job_type = item.get("jobType") or {}
+            jobs.append(
+                JobCandidate(
+                    connector_id=self.connector_id,
+                    external_id=role_id,
+                    title=item.get("jobTitle") or "Untitled role",
+                    company=self.company,
+                    description=description,
+                    location=location,
+                    work_mode=infer_work_mode(location),
+                    employment_type=(
+                        job_type.get("description")
+                        if isinstance(job_type, dict)
+                        else None
+                    ),
+                    posted_at=None,
+                    posted_semantics=None,
+                    apply_url=url,
+                    source_url=url,
+                    source_family=self.family,
+                    raw=item,
+                )
+            )
+        complete = total_count is not None and len(items) >= total_count
+        return ConnectorFetchResult(
+            candidates=jobs,
+            complete=complete,
+            metadata={
+                "total_found": total_count,
+                "items_fetched": len(items),
+                "absence_authoritative": complete,
+            },
+        )
+
+
 class FixtureConnector(OfficialConnector):
     family = "fixture"
     source_domain = "fixture.local"

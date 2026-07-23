@@ -10,8 +10,38 @@ from app.utils import json_dumps, json_loads, new_id, stable_hash, utcnow
 
 
 ROLE_ALIASES = {
-    "backend": ["backend engineer", "backend developer", "api engineer", "server engineer"],
-    "software": ["software engineer", "software developer", "sde"],
+    "backend": [
+        "backend engineer",
+        "backend developer",
+        "api engineer",
+        "server engineer",
+        "software engineer",
+        "software developer",
+        "applications developer",
+    ],
+    "software": [
+        "software engineer",
+        "software developer",
+        "sde",
+        "associate software engineer",
+        "software engineer i",
+        "software developer i",
+        "applications developer",
+        "application development associate",
+        "programmer analyst",
+        "technology analyst",
+        "engineering analyst",
+        "graduate engineer trainee",
+        "project engineer",
+        "systems engineer",
+        "member of technical staff",
+        "associate member of technical staff",
+        "amts",
+        "ai engineer",
+        "llm engineer",
+        "machine learning engineer",
+        "applied ai engineer",
+    ],
     "sde": [
         "software engineer",
         "software engineer i",
@@ -20,10 +50,43 @@ ROLE_ALIASES = {
         "sde i",
         "associate software engineer",
     ],
-    "associate": ["associate software engineer", "software engineer i", "sde i"],
-    "full-stack": ["full stack", "full-stack", "frontend", "backend"],
-    "ai": ["ai engineer", "llm engineer", "generative ai", "machine learning engineer", "applied ai"],
-    "machine learning": ["machine learning", "ml engineer", "data scientist"],
+    "associate": [
+        "associate software engineer",
+        "software engineer i",
+        "sde i",
+        "applications developer",
+        "programmer analyst",
+        "technology analyst",
+        "engineering analyst",
+        "graduate engineer trainee",
+        "project engineer",
+        "systems engineer",
+        "associate member of technical staff",
+        "amts",
+    ],
+    "full-stack": [
+        "full stack engineer",
+        "full-stack engineer",
+        "frontend engineer",
+        "backend engineer",
+        "software engineer",
+    ],
+    "ai": [
+        "ai engineer",
+        "llm engineer",
+        "generative ai engineer",
+        "machine learning engineer",
+        "applied ai engineer",
+        "ai software engineer",
+        "research engineer",
+    ],
+    "machine learning": [
+        "machine learning engineer",
+        "ml engineer",
+        "applied scientist",
+        "data scientist",
+        "research engineer",
+    ],
     "platform": ["platform engineer", "devops", "infrastructure", "sre"],
     "qa": ["sdet", "qa automation", "test automation"],
 }
@@ -92,9 +155,13 @@ def normalize_search_plan(value: Any) -> Dict[str, Any]:
             "lever",
             "ashby",
             "smartrecruiters",
+            "company_portal",
         ]
-    plan["location_policy"] = plan.get("location_policy") or "strict"
-    plan["role_policy"] = plan.get("role_policy") or "strict"
+    plan["location_policy"] = plan.get("location_policy") or "preference_order"
+    plan["role_policy"] = plan.get("role_policy") or "expanded_early_career"
+    plan["freshness_policy"] = plan.get("freshness_policy") or "ranking"
+    plan["metadata_policy"] = plan.get("metadata_policy") or "include_unknown"
+    plan["seniority_policy"] = plan.get("seniority_policy") or "early_career"
     plan["source_policy"] = plan.get("source_policy") or "official_direct"
     return plan
 
@@ -109,11 +176,20 @@ class SearchPlanService:
         if not profile_row:
             raise ValueError("Complete onboarding before searching")
         preferences = self.profiles.preference_map()
-        target_roles = preferences.get(
-            "target_roles", profile_row["profile"].get("role_families", [])
-        )
+        target_roles = preferences.get("target_roles", [])
         if isinstance(target_roles, str):
             target_roles = [target_roles]
+        # Saved roles stay first, while resume-supported adjacent tracks prevent a
+        # narrow label (for example only "Software Engineer") from hiding AI/LLM
+        # or backend roles the candidate is demonstrably qualified to pursue.
+        target_roles = list(
+            dict.fromkeys(
+                [
+                    *target_roles,
+                    *profile_row["profile"].get("role_families", []),
+                ]
+            )
+        )
         aliases = self._role_aliases(target_roles)
         locations = preferences.get("preferred_locations", ["Remote"])
         if isinstance(locations, str):
@@ -183,10 +259,21 @@ class SearchPlanService:
             "salary_min": salary_min,
             "salary_currency": salary_currency,
             "salary_period": salary_period,
-            "location_policy": preferences.get("location_policy", "strict"),
-            "role_policy": "strict",
+            # Ordered preferences affect ranking. They are not exclusions unless a
+            # one-time search explicitly asks for strict geography.
+            "location_policy": "preference_order",
+            "role_policy": "expanded_early_career",
+            "freshness_policy": "ranking",
+            "metadata_policy": "include_unknown",
+            "seniority_policy": "early_career",
             "source_policy": preferences.get("source_policy", "official_direct"),
-            "source_families": ["greenhouse", "lever", "ashby", "smartrecruiters"],
+            "source_families": [
+                "greenhouse",
+                "lever",
+                "ashby",
+                "smartrecruiters",
+                "company_portal",
+            ],
             "freshness_hours": _freshness_hours(
                 preferences.get("freshness_hours", 48)
             ),
@@ -279,6 +366,9 @@ class SearchPlanService:
             raise ValueError("The one-time instruction did not produce a safe search override")
         if "target_roles" in {item["field"] for item in applied}:
             plan["role_aliases"] = self._role_aliases(plan["target_roles"])
+            plan["role_policy"] = "strict"
+        if "freshness_hours" in {item["field"] for item in applied}:
+            plan["freshness_policy"] = "strict"
         plan["temporary_override"] = {
             "instruction": normalized,
             "applied": applied,

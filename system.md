@@ -127,15 +127,22 @@ resume_session(handle, spec) -> result
 cancel(handle) -> status
 ```
 
-If several controlled runtimes are available, Carivyo recommends one based on privacy, model capability, structured-output support, and expected cost. Advanced selection remains optional. If none is available, deterministic onboarding, search, matching, resume validation, and application tracking still work; open-ended chat reports degraded mode.
+If several controlled runtimes are available, Carivyo prefers an installed
+on-device Ollama model for a fresh profile; explicit user selection still wins.
+Ollama cloud pointers are excluded from every local capability. If no local or
+controlled provider runtime is available, deterministic onboarding, search,
+matching, resume validation, and application tracking still work; open-ended
+chat reports degraded mode.
 
 ### 5.2 Resume Import
 
 The user uploads PDF, DOCX, TeX, Markdown, or plain text. The import pipeline:
 
 1. Hashes and stores the original artifact.
-2. Extracts text locally.
-3. Detects identity, experience, education, projects, skills, achievements, links, dates, and possible resume tracks.
+2. Extracts PDF text locally with Poppler before the pypdf fallback and merges wrapped bullet lines.
+3. Detects identity, summary, experience, education, projects, skills,
+   achievements, certifications, volunteer work, leadership, publications,
+   languages, links, dates, and possible resume tracks.
 4. Splits statements into candidate evidence claims.
 5. Records source location and confidence.
 6. Detects conflicts across multiple resumes.
@@ -611,7 +618,12 @@ The skill:
 - Converts custom instructions into structured preferences.
 - Plans minimal changes.
 - Produces editable source and PDF.
-- Runs compile, page, extraction, link, evidence, change-budget, and visual checks.
+- Runs compile, page, extraction, link, evidence, section-completeness,
+  change-budget, and visual checks.
+- Runs an advisory, job-specific hiring-manager simulation through an on-device
+  Ollama model when one is available. It receives only the frozen evidence and
+  cannot control approval. Its visible score is a disclosed 75/25 composite of
+  deterministic evidence coverage and local-model judgment.
 - Returns structured results for the UI.
 - Requires user approval.
 

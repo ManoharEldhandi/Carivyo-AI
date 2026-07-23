@@ -15,7 +15,7 @@ Every gate below must pass before `needs_user_review`:
 | Identity | Approved name and available contact fields are unchanged |
 | Evidence | Every generated factual claim maps to approved evidence |
 | Links | Visible approved links are valid and present in the PDF |
-| Sections | Recognized headings appear in intended order |
+| Sections | Every recognized source section appears in the intended order; page fitting cannot delete a section |
 | Visual | A deterministic raster gate confirms readable page geometry, visible content, safe edge clearance, and plausible density; the product still labels human inspection separately |
 | Change budget | Tailor mode is at or below 25%; above 15% is visibly flagged |
 | First-party ATS analysis | Exactly 27 versioned checks analyze the final extracted PDF against the frozen JD |
@@ -33,6 +33,8 @@ Review these after deterministic validation:
 - Seniority, ownership verbs, dates, and metrics are credible.
 - Repetition is removed without erasing important scope.
 - The document remains natural and readable rather than keyword-stuffed.
+- The advisory local hiring-manager report, when available, references only
+  frozen approved evidence and never overrides deterministic gates.
 - Interview probes are answerable from the approved evidence.
 
 ## Failure behavior

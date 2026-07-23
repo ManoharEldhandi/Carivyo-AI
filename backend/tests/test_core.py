@@ -2,12 +2,17 @@ from __future__ import annotations
 
 import asyncio
 from datetime import timedelta
+import json
 import subprocess
 
 import httpx
 import pytest
 
-from app.connectors.official_ats import GreenhouseConnector
+from app.connectors.official_ats import (
+    GoldmanSachsConnector,
+    GreenhouseConnector,
+    SalesforceConnector,
+)
 from app.config import Settings
 from app.main import build_container
 from app.security import LocalRateLimiter, UnsafeUrl, validate_outbound_url
@@ -117,6 +122,101 @@ def test_official_source_hosts_are_separate_from_apply_hosts():
     )
 
 
+@pytest.mark.asyncio
+async def test_salesforce_official_export_parses_company_roles():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.host == "a.sfdcstatic.com"
+        return httpx.Response(
+            200,
+            json={
+                "Fetch_Timestamp": "2026-07-23T16:01+00:00",
+                "Count": 1,
+                "Report_Entry": [
+                    {
+                        "Job_Requisition_Ref_ID": "JR330400",
+                        "Job_Posting_Title": "Software Engineering AMTS (College Grad)",
+                        "Job_Description": "<p>Build cloud platform software.</p>",
+                        "Job_Requisition_Primary_Location": "India - Hyderabad",
+                        "Time_Type": "Full time",
+                        "External_Job_Posting_Start_Date": "2026-07-22",
+                        "External_Job_Posting_Site": "https://salesforce.wd12.myworkdayjobs.com/External_Career_Site/job/example",
+                    }
+                ],
+            },
+        )
+
+    connector = SalesforceConnector(
+        "salesforce-official-careers",
+        "Salesforce official careers",
+        "Salesforce",
+        {"feed_url": "https://a.sfdcstatic.com/digital/xsf/careers/prod/jobs_2.json"},
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await connector.fetch(client)
+
+    assert result.complete is True
+    assert result[0].title == "Software Engineering AMTS (College Grad)"
+    assert result[0].company == "Salesforce"
+    assert result[0].source_family == "company_portal"
+
+
+@pytest.mark.asyncio
+async def test_goldman_official_graphql_parses_india_analyst_roles():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "POST"
+        payload = json.loads(request.content)
+        assert payload["operationName"] == "GetRoles"
+        return httpx.Response(
+            200,
+            json={
+                "data": {
+                    "roleSearch": {
+                        "totalCount": 1,
+                        "items": [
+                            {
+                                "roleId": "12345",
+                                "corporateTitle": "Analyst",
+                                "jobTitle": "Engineering - Software Engineer - Analyst",
+                                "jobFunction": "Software Engineering",
+                                "status": "Active",
+                                "division": "Engineering Division",
+                                "skills": ["Java", "Python"],
+                                "locations": [
+                                    {
+                                        "primary": True,
+                                        "city": "Hyderabad",
+                                        "state": "Telangana",
+                                        "country": "India",
+                                    }
+                                ],
+                                "jobType": {"description": "Full time"},
+                                "externalSource": {"sourceId": "12345"},
+                            }
+                        ],
+                    }
+                }
+            },
+        )
+
+    connector = GoldmanSachsConnector(
+        "goldman-sachs-higher",
+        "Goldman Sachs Higher",
+        "Goldman Sachs",
+        {
+            "graphql_url": "https://api-higher.gs.com/gateway/api/v1/graphql",
+            "country": "India",
+        },
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await connector.fetch(client)
+
+    assert result.complete is True
+    assert result[0].external_id == "12345"
+    assert result[0].location == "Hyderabad, Telangana, India"
+    assert "Software Engineering" in result[0].description
+    assert result[0].apply_url == "https://higher.gs.com/roles/12345"
+
+
 def test_only_controlled_runtime_adapters_are_reported_available(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
@@ -165,6 +265,15 @@ def test_chat_reuses_persisted_codex_session(settings, monkeypatch: pytest.Monke
     calls = []
 
     monkeypatch.setattr(container.runtime, "resolve_provider", lambda provider: "codex")
+    monkeypatch.setattr(
+        container.runtime,
+        "selection",
+        lambda: {
+            "provider": "codex",
+            "model": "gpt-5.6-terra",
+            "reasoning_effort": "low",
+        },
+    )
 
     def fake_run_chat(
         prompt: str,

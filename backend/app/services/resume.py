@@ -30,6 +30,8 @@ from PIL import Image, ImageChops, ImageStat, UnidentifiedImageError
 from app.artifacts import ArtifactVault
 from app.db import Database
 from app.services.ats import ATSAnalyzer, CRITICAL_CHECK_IDS
+from app.services.extraction import build_evidence, extract_in_subprocess
+from app.services.hiring_agent import LocalHiringAgent
 from app.services.profile import ProfileService
 from app.services.search import SearchService
 from app.utils import (
@@ -46,8 +48,8 @@ class ResumeRunBlocked(ValueError):
 
 
 class ResumeService:
-    SKILL_VERSION = "4.0.0"
-    SUPPORTED_SKILL_VERSIONS = {"3.1.0", "4.0.0"}
+    SKILL_VERSION = "5.0.0"
+    SUPPORTED_SKILL_VERSIONS = {"3.1.0", "4.0.0", "5.0.0"}
     TEMPLATE_ID = "carivyo-ats-a4-tex-v2"
     TEMPLATE_HASH = stable_hash(
         TEMPLATE_ID,
@@ -65,6 +67,7 @@ class ResumeService:
         "links_ok",
         "identity_ok",
         "section_order_ok",
+        "section_completeness_ok",
         "visual_ok",
         "evidence_ok",
     )
@@ -76,6 +79,10 @@ class ResumeService:
         "achievements",
         "education",
         "certifications",
+        "volunteer",
+        "leadership",
+        "publications",
+        "languages",
     }
     DEFAULT_SECTION_ORDER = [
         "summary",
@@ -85,6 +92,10 @@ class ResumeService:
         "achievements",
         "education",
         "certifications",
+        "volunteer",
+        "leadership",
+        "publications",
+        "languages",
     ]
     SECTION_LABELS = {
         "summary": "Summary",
@@ -94,6 +105,10 @@ class ResumeService:
         "achievements": "Achievements",
         "education": "Education",
         "certifications": "Certifications",
+        "volunteer": "Volunteer Experience",
+        "leadership": "Leadership",
+        "publications": "Publications",
+        "languages": "Languages",
     }
 
     def __init__(
@@ -102,12 +117,14 @@ class ResumeService:
         vault: ArtifactVault,
         profiles: ProfileService,
         search: SearchService,
+        hiring_agent: Optional[LocalHiringAgent] = None,
     ):
         self.database = database
         self.vault = vault
         self.profiles = profiles
         self.search = search
         self.ats = ATSAnalyzer()
+        self.hiring_agent = hiring_agent
 
     async def create(self, job_id: str, instructions: str) -> Dict[str, Any]:
         job = await self.search.revalidate(job_id)
@@ -126,7 +143,16 @@ class ResumeService:
             raise ResumeRunBlocked("No imported base resume is available")
         base, base_selection = self._select_base(job, bases, evidence)
         mode = self._mode_for_base(base, evidence)
-        scoped_evidence = self._job_scoped_evidence(job, evidence, base, mode)
+        normalized_text, normalized_evidence = self._normalized_base_evidence(
+            base,
+            evidence,
+        )
+        scoped_evidence = self._job_scoped_evidence(
+            job,
+            normalized_evidence,
+            base,
+            mode,
+        )
 
         run_id = new_id()
         workspace = self.vault.directory("resume-runs", run_id)
@@ -141,9 +167,9 @@ class ResumeService:
             f"resume-runs/{run_id}/inputs/reference-base{base_suffix}",
             Path(base["source_path"]).read_bytes(),
         )
-        reference_text_path = self.vault.write_bytes(
+        reference_text_path = self.vault.write_text(
             f"resume-runs/{run_id}/inputs/reference-base-extracted.txt",
-            Path(base["text_path"]).read_bytes(),
+            normalized_text,
         )
         interpretation = self.interpret_instructions(instructions, base, mode)
         evidence_snapshot = [
@@ -210,6 +236,7 @@ class ResumeService:
             "output_directory": str(workspace),
             "network_policy": "none",
             "skill_version": self.SKILL_VERSION,
+            "extraction_version": "poppler-layout-logical-claims-v2",
             "mode": mode,
             "base_selection": base_selection,
             "template": template,
@@ -880,10 +907,17 @@ class ResumeService:
             )
         source_path = workspace / "variants" / f"resume{variant_number}.tex"
         pdf_path = workspace / "variants" / f"resume{variant_number}.pdf"
-        max_pages = 2 if any(
+        requested_max_pages = 2 if any(
             item.get("value") == "two_pages" and item.get("status") == "applied"
             for item in interpretation
         ) else 1
+        max_pages = requested_max_pages
+        page_limit_relaxed = False
+        required_sections = [
+            category
+            for category in section_order
+            if any(claim["category"] == category for claim in base_claims)
+        ]
         selected_for_pdf = list(selected)
         compiled_with_tectonic = False
         while True:
@@ -905,13 +939,26 @@ class ResumeService:
                     section_order,
                 )
             page_count = len(PdfReader(str(pdf_path)).pages)
-            if page_count <= max_pages or len(selected_for_pdf) <= 4:
+            if page_count <= max_pages:
                 break
             if source_override is not None:
                 raise ResumeRunBlocked(
                     f"The edited TeX exceeds the {max_pages}-page limit"
                 )
-            selected_for_pdf = selected_for_pdf[:-1]
+            trimmed = self._trim_lowest_priority_claim(
+                selected_for_pdf,
+                required_sections,
+                job,
+                interpretation,
+            )
+            if len(trimmed) < len(selected_for_pdf):
+                selected_for_pdf = trimmed
+                continue
+            if max_pages == 1:
+                max_pages = 2
+                page_limit_relaxed = True
+                continue
+            break
 
         reader = PdfReader(str(pdf_path))
         extracted = "\n".join(page.extract_text() or "" for page in reader.pages)
@@ -966,15 +1013,39 @@ class ResumeService:
             selected_for_pdf,
             section_order,
         )
+        present_sections = {
+            claim["category"] for claim in selected_for_pdf
+        }
+        section_inventory = [
+            {
+                "id": category,
+                "label": self.SECTION_LABELS[category],
+                "expected": category in required_sections,
+                "present": category in present_sections,
+                "claim_count": sum(
+                    claim["category"] == category for claim in selected_for_pdf
+                ),
+            }
+            for category in section_order
+            if category in required_sections or category in present_sections
+        ]
+        section_completeness_ok = all(
+            item["present"] for item in section_inventory if item["expected"]
+        )
         visual_ok, visual_details = self._validate_render(render_path)
         validation = {
             "export_ok": pdf_path.exists() and pdf_path.stat().st_size > 500,
             "page_count": len(reader.pages),
             "page_count_ok": len(reader.pages) <= max_pages,
+            "requested_page_limit": requested_max_pages,
+            "effective_page_limit": max_pages,
+            "section_preserving_page_limit_relaxed": page_limit_relaxed,
             "text_extraction_ok": len(extracted.strip()) > 80,
             "links_ok": links_ok,
             "identity_ok": identity_ok,
             "section_order_ok": section_order_ok,
+            "section_completeness_ok": section_completeness_ok,
+            "section_inventory": section_inventory,
             "visual_ok": visual_ok,
             "visual_details": visual_details,
             "evidence_ok": evidence_ok,
@@ -991,6 +1062,7 @@ class ResumeService:
                 "links_ok",
                 "identity_ok",
                 "section_order_ok",
+                "section_completeness_ok",
                 "visual_ok",
                 "evidence_ok",
             )
@@ -1084,6 +1156,28 @@ class ResumeService:
                 for claim in selected_for_pdf[:3]
             ],
         }
+        decision_support = (
+            self.hiring_agent.evaluate(
+                run_id=run_id,
+                claims=selected_for_pdf,
+                requirements=requirement_map,
+                section_inventory=section_inventory,
+                deterministic_ats_score=ats_analysis["overall_score"],
+            )
+            if self.hiring_agent
+            else {
+                "status": "disabled",
+                "advisory": True,
+                "authoritative": False,
+                "dimensions": [],
+                "strengths": [],
+                "concerns": [],
+                "recommended_changes": [],
+                "interview_probes": [],
+                "missing_sections": [],
+            }
+        )
+        hiring_review["decision_support"] = decision_support
         self._write_json(workspace / "reviews" / "requirement-evidence-map.json", requirement_map)
         self._write_json(workspace / "reviews" / "change-plan.json", change_plan)
         self._write_json(workspace / "reviews" / "hiring-review.json", hiring_review)
@@ -1165,6 +1259,8 @@ class ResumeService:
             "validation": validation,
             "ats_analysis": ats_analysis,
             "ats_comparison": ats_comparison,
+            "hiring_evaluation": decision_support,
+            "section_inventory": section_inventory,
             "provenance": {
                 "run_spec_hash": run_spec_hash,
                 "job_snapshot_hash": run_spec["job_snapshot"]["snapshot_hash"],
@@ -1200,7 +1296,10 @@ class ResumeService:
                 if mode == "build"
                 else []
             ),
-            "interview_probes": hiring_review["interview_probes"],
+            "interview_probes": (
+                decision_support.get("interview_probes")
+                or hiring_review["interview_probes"]
+            ),
             "artifacts": {
                 "pdf": str(pdf_path.resolve()),
                 "editable_source": str(source_path.resolve()),
@@ -1209,6 +1308,9 @@ class ResumeService:
                     (workspace / "reports" / "validation.json").resolve()
                 ),
                 "ats_report": str(ats_report_path.resolve()),
+                "hiring_review": str(
+                    (workspace / "reviews" / "hiring-review.json").resolve()
+                ),
             },
             "variant": variant_number,
         }
@@ -1437,6 +1539,10 @@ class ResumeService:
                 *(
                     key
                     for key in self.CRITICAL_VALIDATION_FLAGS
+                    if (
+                        key != "section_completeness_ok"
+                        or run_spec.get("skill_version") == "5.0.0"
+                    )
                     if validation.get(key) is not True
                 ),
                 *(
@@ -1704,6 +1810,96 @@ class ResumeService:
         return selected, selection
 
     @classmethod
+    def _normalized_base_evidence(
+        cls,
+        base: Dict[str, Any],
+        evidence: Sequence[Dict[str, Any]],
+    ) -> Tuple[str, List[Dict[str, Any]]]:
+        """Re-extract one approved base without mutating the active profile.
+
+        This upgrades legacy PDF whitespace and wrapped-line extraction inside
+        the frozen run. Every derived claim still comes from the exact approved
+        source artifact and carries deterministic source-location provenance.
+        """
+
+        fallback_text = Path(base["text_path"]).read_text(
+            encoding="utf-8",
+            errors="replace",
+        )
+        try:
+            text = extract_in_subprocess(
+                Path(base["source_path"]).resolve(),
+                str(base["original_kind"]),
+            )
+            extracted, _summary = build_evidence(text)
+            approved_source_claims = [
+                claim
+                for claim in evidence
+                if claim.get("artifact_id") == base.get("artifact_id")
+            ]
+            used_ids: set[str] = set()
+            claims = []
+            for claim in extracted:
+                if claim.get("category") not in cls.RESUME_CATEGORIES:
+                    continue
+                fresh_start, fresh_end = cls._source_line_range(
+                    claim["source_location"]
+                )
+                source_claims = [
+                    source_claim
+                    for source_claim in approved_source_claims
+                    if cls._source_ranges_overlap(
+                        (fresh_start, fresh_end),
+                        cls._source_line_range(source_claim["source_location"]),
+                    )
+                ]
+                source_claim = next(
+                    (
+                        item
+                        for item in source_claims
+                        if str(item["id"]) not in used_ids
+                    ),
+                    None,
+                )
+                if source_claim is None:
+                    raise ValueError(
+                        "Normalized evidence could not be bound to an approved claim"
+                    )
+                claim_id = str(source_claim["id"])
+                used_ids.add(claim_id)
+                claims.append(
+                    {
+                        **claim,
+                        "id": claim_id,
+                        "artifact_id": base["artifact_id"],
+                        "confidence": 1.0,
+                        "derived_from_approved_artifact": True,
+                        "source_claim_ids": [
+                            str(item["id"]) for item in source_claims
+                        ],
+                    }
+                )
+            if claims:
+                return text, claims
+        except (OSError, ValueError):
+            pass
+        return fallback_text, cls._base_claims(base, evidence)
+
+    @staticmethod
+    def _source_line_range(source_location: str) -> Tuple[int, int]:
+        values = [int(value) for value in re.findall(r"\d+", source_location)]
+        if not values:
+            return (10_000, 10_000)
+        return (values[0], values[-1])
+
+    @staticmethod
+    def _source_ranges_overlap(
+        left: Tuple[int, int],
+        right: Tuple[int, int],
+    ) -> bool:
+        return left[0] <= right[1] and right[0] <= left[1]
+
+    @classmethod
     def _job_scoped_evidence(
         cls,
         job: Dict[str, Any],
@@ -1714,7 +1910,8 @@ class ResumeService:
         eligible = [
             claim
             for claim in evidence
-            if claim.get("category") in cls.RESUME_CATEGORIES
+            if claim.get("artifact_id") == base.get("artifact_id")
+            and claim.get("category") in cls.RESUME_CATEGORIES
         ]
         base_claims = cls._base_claims(base, eligible)
         if mode == "tailor":
@@ -1809,17 +2006,6 @@ class ResumeService:
         interpretation: Sequence[Dict[str, Any]],
         section_order: Sequence[str],
     ) -> List[Dict[str, Any]]:
-        job_tokens = set(tokenize(job["title"] + " " + job["description"]))
-        emphasis_tokens = set(
-            tokenize(
-                " ".join(
-                    item.get("value", "")
-                    for item in interpretation
-                    if item.get("type") == "emphasis"
-                    and item.get("status") == "applied"
-                )
-            )
-        )
         exclusions = [
             item.get("value", "").casefold()
             for item in interpretation
@@ -1836,15 +2022,7 @@ class ResumeService:
                     for value in exclusions
                 )
             ]
-            scored = []
-            for index, claim in enumerate(category_claims):
-                claim_tokens = set(tokenize(claim["text"]))
-                relevance = len(job_tokens & claim_tokens) + 2 * len(
-                    emphasis_tokens & claim_tokens
-                )
-                scored.append((relevance, index, claim))
-            scored.sort(key=lambda item: (-item[0], item[1]))
-            selected.extend(item[2] for item in scored)
+            selected.extend(sorted(category_claims, key=cls._source_line))
         return selected
 
     @classmethod
@@ -2135,8 +2313,9 @@ class ResumeService:
             unique_requirements.append(cleaned)
         return unique_requirements[:18]
 
-    @staticmethod
+    @classmethod
     def _select_evidence(
+        cls,
         job: Dict[str, Any],
         evidence: Sequence[Dict[str, Any]],
         interpretation: Sequence[Dict[str, Any]],
@@ -2153,34 +2332,176 @@ class ResumeService:
             for item in interpretation
             if item.get("type") == "exclude" and item.get("status") == "applied"
         ]
-        scored: List[Tuple[float, Dict[str, Any]]] = []
-        for claim in evidence:
-            if claim["category"] not in {
-                "summary",
-                "experience",
-                "projects",
-                "skills",
-                "achievements",
-                "education",
-                "certifications",
-            }:
-                continue
-            if any(value and value in claim["text"].casefold() for value in exclusions):
-                continue
+        eligible = [
+            claim
+            for claim in evidence
+            if claim.get("category") in cls.RESUME_CATEGORIES
+            and not any(
+                value and value in str(claim.get("text") or "").casefold()
+                for value in exclusions
+            )
+        ]
+        grouped: Dict[str, List[Dict[str, Any]]] = {}
+        for claim in eligible:
+            grouped.setdefault(claim["category"], []).append(claim)
+        for claims in grouped.values():
+            claims.sort(key=cls._source_line)
+
+        def relevance(claim: Dict[str, Any]) -> float:
             claim_tokens = set(tokenize(claim["text"]))
-            score = len(job_tokens & claim_tokens) + 2 * len(emphasis_tokens & claim_tokens)
+            score = len(job_tokens & claim_tokens) + 2 * len(
+                emphasis_tokens & claim_tokens
+            )
             if claim["category"] in {"experience", "projects"}:
                 score += 1.5
-            scored.append((score, claim))
-        scored.sort(key=lambda item: (item[0], item[1]["confidence"]), reverse=True)
-        selected = [claim for score, claim in scored if score > 0][:10]
-        if len(selected) < 5:
-            for _, claim in scored:
-                if claim not in selected:
-                    selected.append(claim)
-                if len(selected) >= 7:
-                    break
+            return score
+
+        caps = {
+            "summary": 1,
+            "experience": 5,
+            "projects": 8,
+            "skills": 3,
+            "achievements": 3,
+            "education": 2,
+            "certifications": 2,
+            "volunteer": 3,
+            "leadership": 3,
+            "publications": 2,
+            "languages": 2,
+        }
+        selected: List[Dict[str, Any]] = []
+        for category in cls.DEFAULT_SECTION_ORDER:
+            category_claims = grouped.get(category, [])
+            if not category_claims:
+                continue
+            cap = caps[category]
+            if category == "projects":
+                chosen = cls._select_project_blocks(category_claims, relevance, cap)
+            elif category == "experience":
+                context = category_claims[:2]
+                remaining = sorted(
+                    category_claims[2:],
+                    key=lambda claim: (-relevance(claim), cls._source_line(claim)),
+                )
+                chosen = (context + remaining[: max(0, cap - len(context))])[:cap]
+            else:
+                chosen = sorted(
+                    category_claims,
+                    key=lambda claim: (-relevance(claim), cls._source_line(claim)),
+                )[:cap]
+            if not chosen:
+                chosen = [category_claims[0]]
+            selected.extend(sorted(chosen, key=cls._source_line))
         return selected
+
+    @classmethod
+    def _select_project_blocks(
+        cls,
+        claims: Sequence[Dict[str, Any]],
+        relevance: Any,
+        cap: int,
+    ) -> List[Dict[str, Any]]:
+        anchor_indices = [
+            index
+            for index, claim in enumerate(claims)
+            if cls._is_entry_heading("projects", claim["text"])
+        ]
+        if not anchor_indices:
+            return sorted(
+                claims,
+                key=lambda claim: (-relevance(claim), cls._source_line(claim)),
+            )[:cap]
+        blocks: List[List[Dict[str, Any]]] = []
+        for position, start in enumerate(anchor_indices):
+            end = (
+                anchor_indices[position + 1]
+                if position + 1 < len(anchor_indices)
+                else len(claims)
+            )
+            blocks.append(list(claims[start:end]))
+        ranked = sorted(
+            blocks,
+            key=lambda block: (
+                -sum(relevance(claim) for claim in block),
+                cls._source_line(block[0]),
+            ),
+        )[:2]
+        chosen: List[Dict[str, Any]] = []
+        for block in ranked:
+            anchor = block[0]
+            rest = sorted(
+                block[1:],
+                key=lambda claim: (-relevance(claim), cls._source_line(claim)),
+            )
+            chosen.extend([anchor, *rest[:3]])
+        return sorted(chosen[:cap], key=cls._source_line)
+
+    @staticmethod
+    def _source_line(claim: Dict[str, Any]) -> int:
+        match = re.search(r"(\d+)", str(claim.get("source_location") or ""))
+        return int(match.group(1)) if match else 10_000
+
+    @staticmethod
+    def _is_entry_heading(category: str, text: str) -> bool:
+        lowered = text.casefold()
+        if category == "projects":
+            return bool(
+                re.search(r"(?:github\.com/|gitlab\.com/|https?://)", lowered)
+                or re.search(r"\s[—–-]\s", text)
+            )
+        if category == "experience":
+            return bool(
+                re.search(r"\b(?:19|20)\d{2}\b.*(?:present|current|\b(?:19|20)\d{2}\b)", lowered)
+                or "|" in text
+            )
+        return False
+
+    @classmethod
+    def _trim_lowest_priority_claim(
+        cls,
+        claims: Sequence[Dict[str, Any]],
+        required_sections: Sequence[str],
+        job: Dict[str, Any],
+        interpretation: Sequence[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """Remove one low-value detail without deleting a source section."""
+
+        counts = {
+            category: sum(claim["category"] == category for claim in claims)
+            for category in cls.RESUME_CATEGORIES
+        }
+        job_tokens = set(tokenize(job["title"] + " " + job["description"]))
+        emphasis_tokens = set(
+            tokenize(
+                " ".join(
+                    str(item.get("value") or "")
+                    for item in interpretation
+                    if item.get("type") == "emphasis"
+                    and item.get("status") == "applied"
+                )
+            )
+        )
+        candidates: List[Tuple[float, int]] = []
+        for index, claim in enumerate(claims):
+            category = claim["category"]
+            minimum = 1 if category in required_sections else 0
+            if counts.get(category, 0) <= minimum:
+                continue
+            heading = cls._is_entry_heading(category, claim["text"])
+            if heading and any(
+                other["category"] == category
+                and not cls._is_entry_heading(category, other["text"])
+                for other in claims
+            ):
+                continue
+            tokens = set(tokenize(claim["text"]))
+            relevance = len(tokens & job_tokens) + 2 * len(tokens & emphasis_tokens)
+            continuity = 2 if category in {"summary", "education"} else 0
+            candidates.append((relevance + continuity, index))
+        if not candidates:
+            return list(claims)
+        _, remove_index = min(candidates, key=lambda item: (item[0], -item[1]))
+        return [claim for index, claim in enumerate(claims) if index != remove_index]
 
     @classmethod
     def _build_markdown(
@@ -2238,8 +2559,8 @@ class ResumeService:
             grouped.setdefault(claim["category"], []).append(claim)
 
         body: List[str] = [
-            r"\documentclass[10pt,a4paper]{article}",
-            r"\usepackage[margin=0.52in]{geometry}",
+            r"\documentclass[11pt,a4paper]{article}",
+            r"\usepackage[margin=0.58in]{geometry}",
             r"\usepackage{enumitem}",
             r"\usepackage{xcolor}",
             r"\usepackage{hyperref}",
@@ -2274,11 +2595,57 @@ class ResumeService:
                 for item in items:
                     body.append(cls._tex_escape(str(item["text"])) + r"\par")
                 continue
-            body.append(r"\begin{itemize}[leftmargin=13pt,itemsep=1pt,topsep=1pt,parsep=0pt]")
-            body.extend(
-                "\\item " + cls._tex_escape(str(item["text"])) for item in items
-            )
-            body.append(r"\end{itemize}")
+            if category in {"skills", "languages"}:
+                for item in items:
+                    label, separator, value = str(item["text"]).partition(":")
+                    if separator and len(label) <= 40:
+                        body.append(
+                            r"{\small\textbf{"
+                            + cls._tex_escape(label + ":")
+                            + "} "
+                            + cls._tex_escape(value.strip())
+                            + r"}\par"
+                        )
+                    else:
+                        body.append(
+                            r"{\small "
+                            + cls._tex_escape(str(item["text"]))
+                            + r"}\par"
+                        )
+                continue
+            if category in {"education", "certifications", "publications"}:
+                for index, item in enumerate(items):
+                    command = r"\textbf" if index == 0 else r"\textit"
+                    body.append(
+                        command
+                        + "{"
+                        + cls._tex_escape(str(item["text"]))
+                        + r"}\par"
+                    )
+                continue
+
+            list_open = False
+            for item in items:
+                text = str(item["text"])
+                is_heading = cls._is_entry_heading(category, text)
+                if is_heading or cls._looks_like_technology_line(text):
+                    if list_open:
+                        body.append(r"\end{itemize}")
+                        list_open = False
+                    command = r"\textbf" if is_heading else r"\textit"
+                    rendered = command + "{" + cls._tex_escape(text) + "}"
+                    if is_heading and len(text) > 95:
+                        rendered = r"{\small " + rendered + "}"
+                    body.append(rendered + r"\par")
+                    continue
+                if not list_open:
+                    body.append(
+                        r"\begin{itemize}[leftmargin=13pt,itemsep=1pt,topsep=1pt,parsep=0pt]"
+                    )
+                    list_open = True
+                body.append("\\item " + cls._tex_escape(text))
+            if list_open:
+                body.append(r"\end{itemize}")
         body.extend([r"\end{document}", ""])
         return "\n".join(body)
 
@@ -2297,6 +2664,14 @@ class ResumeService:
             "^": r"\textasciicircum{}",
         }
         return "".join(replacements.get(character, character) for character in value)
+
+    @staticmethod
+    def _looks_like_technology_line(text: str) -> bool:
+        return (
+            text.count("·") >= 1
+            and len(text) <= 220
+            and not re.search(r"[.!?]$", text)
+        )
 
     @staticmethod
     def _compile_tex(source_path: Path, output_path: Path) -> bool:
@@ -2401,6 +2776,20 @@ class ResumeService:
             textColor=colors.HexColor("#172033"),
             spaceAfter=1.5,
         )
+        entry_style = ParagraphStyle(
+            "Entry",
+            parent=body_style,
+            fontName="Helvetica-Bold",
+            spaceBefore=1.5,
+            spaceAfter=0.5,
+        )
+        meta_style = ParagraphStyle(
+            "Meta",
+            parent=body_style,
+            fontName="Helvetica-Oblique",
+            textColor=colors.HexColor("#475467"),
+            spaceAfter=0.8,
+        )
         document = SimpleDocTemplate(
             str(output_path),
             pagesize=A4,
@@ -2439,22 +2828,47 @@ class ResumeService:
                 for item in items:
                     story.append(Paragraph(html.escape(item["text"]), body_style))
                 continue
-            story.append(
-                ListFlowable(
-                    [
-                        ListItem(
-                            Paragraph(html.escape(item["text"]), body_style),
-                            leftIndent=9,
+            if category in {"skills", "languages"}:
+                for item in items:
+                    label, separator, value = str(item["text"]).partition(":")
+                    markup = (
+                        f"<b>{html.escape(label + ':')}</b> {html.escape(value.strip())}"
+                        if separator and len(label) <= 40
+                        else html.escape(str(item["text"]))
+                    )
+                    story.append(Paragraph(markup, body_style))
+                continue
+            if category in {"education", "certifications", "publications"}:
+                for index, item in enumerate(items):
+                    story.append(
+                        Paragraph(
+                            html.escape(str(item["text"])),
+                            entry_style if index == 0 else meta_style,
                         )
-                        for item in items
-                    ],
-                    bulletType="bullet",
-                    start="circle",
-                    leftIndent=13,
-                    bulletFontSize=5,
-                    spaceAfter=2,
-                )
-            )
+                    )
+                continue
+            for item in items:
+                text = str(item["text"])
+                if cls._is_entry_heading(category, text):
+                    story.append(Paragraph(html.escape(text), entry_style))
+                elif cls._looks_like_technology_line(text):
+                    story.append(Paragraph(html.escape(text), meta_style))
+                else:
+                    story.append(
+                        ListFlowable(
+                            [
+                                ListItem(
+                                    Paragraph(html.escape(text), body_style),
+                                    leftIndent=9,
+                                )
+                            ],
+                            bulletType="bullet",
+                            start="circle",
+                            leftIndent=13,
+                            bulletFontSize=5,
+                            spaceAfter=0.5,
+                        )
+                    )
         document.build(story)
         output_path.chmod(0o600)
 

@@ -171,11 +171,11 @@ export function ProfilePage({
         seniority_tolerance: draft.seniority_tolerance.trim(),
         excluded_keywords: splitTerms(draft.excluded_keywords),
         excluded_locations: splitTerms(draft.excluded_locations),
-        location_policy: "strict",
+        location_policy: "preference_order",
         freshness_hours: draft.freshness_hours
       });
       await refreshProfile();
-      setNotice("Search priorities saved. New searches will enforce the updated contract.");
+      setNotice("Search priorities saved. New searches will rank close matches and keep missing metadata visible.");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Search priorities could not be saved.");
     } finally {
@@ -387,7 +387,7 @@ export function ProfilePage({
             <span className="settings-section__icon"><MapPinned aria-hidden="true" /></span>
             <div>
               <h2 id="priorities-title">Set your job search priorities</h2>
-              <p>Rank the roles and locations you want. Carivyo will not broaden them automatically.</p>
+              <p>Rank the roles and locations you want. Carivyo keeps close matches with missing metadata and labels the tradeoffs.</p>
             </div>
           </div>
 

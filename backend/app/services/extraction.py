@@ -25,17 +25,44 @@ SECTION_NAMES = {
     "experience": "experience",
     "work experience": "experience",
     "professional experience": "experience",
+    "work history": "experience",
+    "career history": "experience",
+    "internships": "experience",
     "employment": "experience",
     "projects": "projects",
     "selected projects": "projects",
+    "personal projects": "projects",
+    "academic projects": "projects",
     "education": "education",
     "skills": "skills",
     "technical skills": "skills",
+    "core competencies": "skills",
+    "technologies": "skills",
     "certifications": "certifications",
+    "certificates": "certifications",
+    "licenses & certifications": "certifications",
+    "licenses and certifications": "certifications",
     "achievements": "achievements",
     "awards": "achievements",
+    "awards & honors": "achievements",
+    "awards and honors": "achievements",
+    "honors": "achievements",
     "summary": "summary",
     "profile": "summary",
+    "professional summary": "summary",
+    "career summary": "summary",
+    "executive summary": "summary",
+    "about me": "summary",
+    "volunteer": "volunteer",
+    "volunteering": "volunteer",
+    "volunteer experience": "volunteer",
+    "leadership": "leadership",
+    "leadership experience": "leadership",
+    "publications": "publications",
+    "research & publications": "publications",
+    "research and publications": "publications",
+    "languages": "languages",
+    "spoken languages": "languages",
 }
 
 SKILL_TERMS = [
@@ -150,27 +177,97 @@ def extract_in_subprocess(path: Path, kind: str, timeout_seconds: int = 20) -> s
     return text
 
 
-def split_sections(text: str) -> Dict[str, List[Tuple[int, str]]]:
-    sections: Dict[str, List[Tuple[int, str]]] = {"header": []}
+def split_sections(text: str) -> Dict[str, List[Tuple[int, str, bool]]]:
+    sections: Dict[str, List[Tuple[int, str, bool]]] = {"header": []}
     current = "header"
     for index, raw_line in enumerate(text.splitlines(), start=1):
-        line = normalize_space(raw_line.strip("•●▪◦\t "))
+        stripped = raw_line.strip()
+        bullet = bool(re.match(r"^[•●▪◦●\-*]\s+", stripped))
+        line = normalize_space(stripped.strip("•●▪◦\t -*"))
         if not line:
             continue
-        heading_key = line.casefold().rstrip(":")
+        heading_key = normalize_space(line.casefold().rstrip(":"))
         if heading_key in SECTION_NAMES and len(line) <= 40:
             current = SECTION_NAMES[heading_key]
             sections.setdefault(current, [])
             continue
-        sections.setdefault(current, []).append((index, line))
+        sections.setdefault(current, []).append((index, line, bullet))
     return sections
+
+
+def _logical_claims(
+    category: str,
+    lines: List[Tuple[int, str, bool]],
+) -> List[Tuple[str, str]]:
+    """Merge wrapped PDF lines while preserving entry and bullet boundaries."""
+
+    if not lines:
+        return []
+    if category == "summary":
+        return [
+            (
+                f"line:{lines[0][0]}-{lines[-1][0]}",
+                normalize_space(" ".join(item[1] for item in lines)),
+            )
+        ]
+
+    result: List[Tuple[str, str]] = []
+    active_start = 0
+    active_end = 0
+    active_text = ""
+    active_is_bullet = False
+
+    def flush() -> None:
+        nonlocal active_start, active_end, active_text, active_is_bullet
+        if active_text:
+            location = (
+                f"line:{active_start}"
+                if active_start == active_end
+                else f"line:{active_start}-{active_end}"
+            )
+            result.append((location, normalize_space(active_text)))
+        active_start = active_end = 0
+        active_text = ""
+        active_is_bullet = False
+
+    for line_number, line, is_bullet in lines:
+        if is_bullet:
+            flush()
+            active_start = active_end = line_number
+            active_text = line
+            active_is_bullet = True
+            continue
+        entry_boundary = (
+            category == "projects"
+            and bool(
+                re.search(r"(?:github\.com/|gitlab\.com/|https?://)", line, re.IGNORECASE)
+            )
+        ) or (
+            category == "experience"
+            and bool(
+                re.search(
+                    r"\b(?:19|20)\d{2}\b.*(?:present|current|\b(?:19|20)\d{2}\b)",
+                    line,
+                    re.IGNORECASE,
+                )
+            )
+        )
+        if active_is_bullet and not entry_boundary:
+            active_end = line_number
+            active_text = f"{active_text} {line}"
+            continue
+        flush()
+        active_start = active_end = line_number
+        active_text = line
+    flush()
+    return result
 
 
 def build_evidence(text: str) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     sections = split_sections(text)
     claims: List[Dict[str, Any]] = []
     for category, lines in sections.items():
-        for line_number, line in lines:
+        for source_location, line in _logical_claims(category, lines):
             if len(line) < 12 or len(line) > 700:
                 continue
             if category == "header" and (
@@ -183,7 +280,7 @@ def build_evidence(text: str) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
                 {
                     "category": category if category != "header" else "identity",
                     "text": line,
-                    "source_location": f"line:{line_number}",
+                    "source_location": source_location,
                     "confidence": 1.0,
                 }
             )
@@ -218,7 +315,16 @@ def build_evidence(text: str) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
             break
     email_match = re.search(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}", text)
     phone_match = re.search(r"(?:\+\d{1,3}[-\s]?)?[\d()\s-]{8,}\d", text)
-    links = unique(re.findall(r"https?://[^\s|,)]+", text))
+    raw_links = re.findall(
+        r"(?:(?:https?://|www\.)[^\s|,)·]+|"
+        r"(?:github\.com|linkedin\.com/in|[A-Za-z0-9.-]+\.github\.io)"
+        r"/[^\s|,)·]+)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    links = unique(
+        [link if link.startswith(("http://", "https://")) else f"https://{link}" for link in raw_links]
+    )
 
     highlights = [
         claim["text"]

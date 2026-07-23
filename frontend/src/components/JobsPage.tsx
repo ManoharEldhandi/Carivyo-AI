@@ -273,7 +273,8 @@ export function JobsPage({
 
   const coverage = latestRun?.coverage ?? {};
   const sources = coverage.sources ?? [];
-  const successfulSources = sources.filter((source) => source.status === "ok").length;
+  const checkedSources = sources.filter((source) => source.status !== "failed").length;
+  const partialSources = sources.filter((source) => source.status === "partial").length;
   const failedSources = sources.filter((source) => source.status === "failed").length;
   const rejectionEntries = Object.entries(coverage.rejections ?? {}).sort(
     ([, first], [, second]) => second - first
@@ -365,8 +366,8 @@ export function JobsPage({
           </ol>
         </div>
         <div className="contract-rules">
-          <span><Clock3 aria-hidden="true" /> ≤{contract?.freshness_hours ?? 48}h</span>
-          <span><ShieldCheck aria-hidden="true" /> Company sites</span>
+          <span><Clock3 aria-hidden="true" /> {contract?.freshness_policy === "strict" ? `Only ≤${contract?.freshness_hours ?? 48}h` : `Freshness ranked · target ≤${contract?.freshness_hours ?? 48}h`}</span>
+          <span><ShieldCheck aria-hidden="true" /> 100+ company sites</span>
           <span>{contract?.work_modes?.length ? contract.work_modes.join(" · ") : "Any work mode"}</span>
           {contract?.employment_types?.length ? (
             <span>{contract.employment_types.map((item) => item.replaceAll("_", " ")).join(" · ")}</span>
@@ -403,7 +404,9 @@ export function JobsPage({
             <span>
               {latestRun.status === "not_run"
                 ? "Refresh when you are ready to check official sources."
-                : `${successfulSources} source${successfulSources === 1 ? "" : "s"} checked${
+                : `${checkedSources} source${checkedSources === 1 ? "" : "s"} checked${
+                    partialSources ? ` · ${partialSources} bounded partial` : ""
+                  }${
                     failedSources ? ` · ${failedSources} unavailable` : ""
                   }${latestRun.finished_at ? ` · ${formatRunTime(latestRun.finished_at)}` : ""}`}
             </span>
@@ -544,6 +547,9 @@ export function JobsPage({
                 <p className="detail-posted">
                   {postedLabel(selected.posted_at)} · {freshnessLabel(selected.freshness_class)} · {verificationLabel(selected.verified_at)}
                 </p>
+                <p className="detail-posted">
+                  {salaryLabel(selected.salary)} · {selected.employment_type ?? "Employment type not listed"}
+                </p>
               </div>
             </div>
             <div className="score-breakdown" role="group" aria-label="Fit factors">
@@ -617,26 +623,26 @@ function EmptyJobsState({
 }) {
   let title = "No jobs match all your priorities";
   let copy = rejectionEntries.length
-    ? `The latest search rejected candidates that missed at least one strict rule. The largest group was: ${
+    ? `The latest search rejected candidates that missed a required boundary. The largest group was: ${
         rejectionLabels[rejectionEntries[0][0]] ?? rejectionEntries[0][0].replaceAll("_", " ")
       } (${rejectionEntries[0][1]}).`
-    : "No current jobs met every saved priority.";
+    : "No current jobs met the required role, geography, and official-link boundaries.";
 
   if (hasQuery) {
     title = "No results match this filter";
-    copy = "The strict feed is unchanged. Clear the text filter to see every accepted role.";
+    copy = "Clear the text filter to see every accepted role.";
   } else if (savedOnly) {
     title = "No saved jobs yet";
-    copy = "Save a strict-match role to keep it here for later review.";
+    copy = "Save a promising role to keep it here for later review.";
   } else if (!latestRun || latestRun.status === "not_run") {
     title = "No search has run yet";
-    copy = "Refresh to check the configured official sources against your enforced contract.";
+    copy = "Refresh to check the configured official sources against your preferences.";
   } else if (latestRun.status === "failed") {
     title = "The latest search could not reach official sources";
     copy = "No current result set is available. Your priorities were not broadened or ignored.";
   } else if (latestRun.status === "partial") {
     title = "No roles passed within partial coverage";
-    copy = "Some official sources were unavailable, and the sources that responded returned no roles meeting every rule.";
+    copy = "Some official sources were unavailable, and the sources that responded returned no roles inside the required boundaries.";
   }
 
   return (
@@ -646,7 +652,7 @@ function EmptyJobsState({
       <p>{copy}</p>
       <div className="empty-state__actions">
         <button className="button button--secondary" type="button" onClick={hasQuery || savedOnly ? onClear : onRefresh}>
-          {hasQuery || savedOnly ? "Show all strict matches" : "Refresh official sources"}
+          {hasQuery || savedOnly ? "Show all matches" : "Refresh official sources"}
         </button>
         {!hasQuery && !savedOnly ? (
           <button className="button button--quiet" type="button" onClick={onBroaden}>
@@ -682,6 +688,17 @@ function formatRunTime(value: string) {
     hour: "numeric",
     minute: "2-digit"
   }).format(date);
+}
+
+function salaryLabel(salary: Job["salary"]) {
+  if (!salary) return "Salary not listed";
+  if (salary.text) return salary.text;
+  const currency = salary.currency ? `${salary.currency} ` : "";
+  const minimum = typeof salary.min === "number" ? salary.min.toLocaleString() : "";
+  const maximum = typeof salary.max === "number" ? salary.max.toLocaleString() : "";
+  const range = minimum && maximum ? `${minimum}–${maximum}` : minimum || maximum;
+  const period = salary.interval ?? salary.period;
+  return range ? `${currency}${range}${period ? ` / ${period}` : ""}` : "Salary details listed on the official page";
 }
 
 function factorMaximum(factor: string) {

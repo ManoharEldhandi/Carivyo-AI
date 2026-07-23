@@ -19,6 +19,7 @@ def settings(tmp_path: Path) -> Settings:
         bootstrap_token="test-bootstrap-token",
         request_timeout_seconds=2,
         runtime_timeout_seconds=5,
+        local_hiring_agent_enabled=False,
     )
 
 

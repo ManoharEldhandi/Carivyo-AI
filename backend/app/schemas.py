@@ -273,7 +273,7 @@ class PreferenceUpdateRequest(BaseModel):
             "annual",
         ]
     ] = None
-    location_policy: Literal["strict"] = "strict"
+    location_policy: Literal["preference_order", "strict"] = "preference_order"
     freshness_hours: int = Field(default=48, ge=1, le=168)
 
     @field_validator(

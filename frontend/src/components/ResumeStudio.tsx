@@ -542,6 +542,8 @@ export function ResumeStudio({ job, onClose }: Props) {
                 <p className="eyebrow">Built-in guardrails</p>
                 {[
                   "Approved evidence only",
+                  "Every recognized source section preserved",
+                  "Local hiring-manager review when Ollama is available",
                   "Original resume never overwritten",
                   "Unsupported requirements stay visible",
                   "PDF, links, layout, and extraction validated"
@@ -785,6 +787,77 @@ export function ResumeStudio({ job, onClose }: Props) {
                             ))}
                           </div>
                         ) : null
+                    )}
+                  </div>
+                </details>
+
+                <details className="resume-supporting-details">
+                  <summary>Sections and local hiring-manager review</summary>
+                  <div className="resume-supporting-details__body">
+                    <h4>Section completeness</h4>
+                    <div className="validation-list">
+                      {(run.result.section_inventory ?? []).map((section) => (
+                        <div className={section.present ? "is-passed" : "is-warning"} key={section.id}>
+                          {section.present
+                            ? <CheckCircle2 aria-hidden="true" />
+                            : <AlertTriangle aria-hidden="true" />}
+                          <span>{section.label}</span>
+                          <strong>{section.present ? `${section.claim_count} items` : "Missing"}</strong>
+                        </div>
+                      ))}
+                    </div>
+
+                    {run.result.hiring_evaluation?.status === "complete" ? (
+                      <div className="ats-report">
+                        <div className="ats-report__heading">
+                          <div>
+                            <p className="eyebrow">On-device decision support</p>
+                            <h4>Hiring-manager lens</h4>
+                          </div>
+                          <strong>{Math.round(run.result.hiring_evaluation.score ?? 0)}/100</strong>
+                        </div>
+                        <p className="muted">
+                          {run.result.hiring_evaluation.disclaimer}
+                        </p>
+                        {run.result.hiring_evaluation.score_basis ? (
+                          <p className="muted">
+                            Composite score: {run.result.hiring_evaluation.score_basis}.
+                            {run.result.hiring_evaluation.raw_model_score !== undefined
+                              ? ` Raw local-model score: ${Math.round(run.result.hiring_evaluation.raw_model_score)}/100.`
+                              : ""}
+                          </p>
+                        ) : null}
+                        <div className="ats-categories">
+                          {run.result.hiring_evaluation.dimensions.map((dimension) => (
+                            <div key={dimension.id}>
+                              <span>{dimension.id.replaceAll("_", " ")}</span>
+                              <strong>{Math.round(dimension.score)}/{dimension.max}</strong>
+                              <span className="ats-category-track" aria-hidden="true">
+                                <span style={{ width: `${(dimension.score / dimension.max) * 100}%` }} />
+                              </span>
+                              <small>{dimension.rationale}</small>
+                            </div>
+                          ))}
+                        </div>
+                        {run.result.hiring_evaluation.recommended_changes.length ? (
+                          <div className="ats-issues">
+                            <span className="field-label">Recommended truthful improvements</span>
+                            <ul className="detail-list">
+                              {run.result.hiring_evaluation.recommended_changes.map((change) => (
+                                <li key={change}>{change}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        ) : null}
+                        <p className="mono">
+                          {run.result.hiring_evaluation.provider} · {run.result.hiring_evaluation.model}
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="inline-notice">
+                        {run.result.hiring_evaluation?.reason ??
+                          "The local hiring-manager review was not run for this saved version."}
+                      </div>
                     )}
                   </div>
                 </details>

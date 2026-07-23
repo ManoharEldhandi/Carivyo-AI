@@ -124,6 +124,9 @@ Write `result.json` with:
     "page_count": 1,
     "text_extraction_ok": true,
     "links_ok": true,
+    "section_order_ok": true,
+    "section_completeness_ok": true,
+    "section_inventory": [],
     "visual_ok": true,
     "visual_details": {
       "method": "deterministic_raster_v1",
@@ -153,6 +156,17 @@ Write `result.json` with:
     "checks": [],
     "critical_failures": [],
     "disclaimer": "string"
+  },
+  "hiring_evaluation": {
+    "status": "complete|unavailable|failed|disabled",
+    "provider": "ollama",
+    "advisory": true,
+    "score": 0,
+    "raw_model_score": 0,
+    "deterministic_ats_score": 0,
+    "score_basis": "75% deterministic evidence coverage and 25% local hiring-manager judgment",
+    "authoritative": false,
+    "dimensions": []
   },
   "approval": {
     "required": true,

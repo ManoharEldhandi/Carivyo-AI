@@ -220,6 +220,7 @@ def test_critical_user_journey(client, tmp_path: Path):
         "lever",
         "ashby",
         "smartrecruiters",
+        "company_portal",
     }
 
     profile = client.get("/api/profile")
@@ -230,8 +231,9 @@ def test_critical_user_journey(client, tmp_path: Path):
     jobs = client.get("/api/jobs")
     assert jobs.status_code == 200
     payload = jobs.json()
-    assert payload["count"] == 2
+    assert payload["count"] == 3
     assert payload["freshness"]["verified_24h"] == 2
+    assert payload["freshness"]["verified_48h"] == 1
     selected = payload["jobs"][0]
     assert selected["reasons"]
     assert selected["apply_url"].startswith("https://jobs.example.com/")
@@ -267,7 +269,7 @@ def test_critical_user_journey(client, tmp_path: Path):
         "required": True,
         "user_approved": False,
     }
-    assert result["provenance"]["skill_version"] == "4.0.0"
+    assert result["provenance"]["skill_version"] == "5.0.0"
     assert len(result["ats_analysis"]["checks"]) == 27
     assert 0 <= result["ats_analysis"]["overall_score"] <= 100
     assert "No universal ATS score exists" in result["ats_analysis"]["disclaimer"]

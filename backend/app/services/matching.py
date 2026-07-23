@@ -46,7 +46,13 @@ class MatchingService:
         skill_score = min(22.0, len(matched_skills) * 3.2)
 
         required_years = self._required_years(job["description"])
-        experience_score = 13.0 if required_years is None or required_years <= 3 else 6.0
+        experience_score = (
+            13.0
+            if required_years is None or required_years <= 2
+            else 8.0
+            if required_years == 3
+            else 4.0
+        )
 
         location_score, location_reason, location_risk = self._location_score(
             job.get("location", ""), job.get("work_mode"), plan.get("locations", [])
@@ -136,14 +142,25 @@ class MatchingService:
         risks: List[str] = []
         if required_years and required_years > 3:
             risks.append(f"The description asks for about {required_years}+ years of experience.")
+        if re.search(
+            r"\b(?:sde|engineer|developer)\s*(?:ii|2)\b",
+            str(job.get("title") or "").casefold(),
+        ):
+            risks.append("The title is level II; verify that its experience band is flexible.")
         if location_risk:
             risks.append(location_risk)
         if exclusion_hits:
             risks.append("Possible exclusion match: " + ", ".join(exclusion_hits[:3]))
-        if not matched_skills:
-            risks.append("No strong skill overlap was found in the approved evidence.")
         if freshness_class == "live_date_unverified":
             risks.append("The official route is live, but its posting time is not proven.")
+        if plan.get("work_modes") and not job.get("work_mode"):
+            risks.append("The employer did not list a work mode; verify it before applying.")
+        if plan.get("employment_types") and not job.get("employment_type"):
+            risks.append("The employer did not list an employment type.")
+        if plan.get("salary_min") is not None and not job.get("salary"):
+            risks.append("Salary is not published; this role remains eligible.")
+        if not matched_skills:
+            risks.append("No strong skill overlap was found in the approved evidence.")
 
         tier = "strong" if score >= 78 else "good" if score >= 65 else "possible" if score >= 50 else "low"
         selected_reasons = reasons[:3]
@@ -278,13 +295,29 @@ class MatchingService:
 
     @staticmethod
     def _required_years(description: str) -> Optional[int]:
-        values = [
-            int(value)
-            for value in re.findall(
-                r"(\d{1,2})\s*\+?\s*(?:years?|yrs?)", description.casefold()
-            )
-            if int(value) < 20
-        ]
+        normalized = description.casefold()
+        values: List[int] = []
+        occupied: List[Tuple[int, int]] = []
+        for match in re.finditer(
+            r"\b(\d{1,2})\s*(?:-|–|—|to)\s*(\d{1,2})\s*(?:years?|yrs?)\b",
+            normalized,
+        ):
+            minimum, maximum = int(match.group(1)), int(match.group(2))
+            if minimum <= maximum < 20:
+                values.append(minimum)
+                occupied.append(match.span())
+        for match in re.finditer(
+            r"\b(\d{1,2})\s*\+?\s*(?:years?|yrs?)\b",
+            normalized,
+        ):
+            if any(
+                match.start() < end and match.end() > start
+                for start, end in occupied
+            ):
+                continue
+            value = int(match.group(1))
+            if value < 20:
+                values.append(value)
         return min(values) if values else None
 
     @staticmethod

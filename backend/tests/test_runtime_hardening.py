@@ -20,6 +20,34 @@ def test_runtime_rejects_unreviewed_per_message_model(settings, monkeypatch):
         gateway.run_chat("hello", provider="codex", model="not-in-catalog")
 
 
+def test_ollama_cloud_pointers_are_not_reported_as_local(settings, monkeypatch):
+    payload = {
+        "models": [
+            {
+                "name": "cloud-model:cloud",
+                "remote_host": "https://ollama.com",
+                "remote_model": "cloud-model",
+            },
+            {"name": "llama-local:latest", "size": 4_000_000_000},
+        ]
+    }
+    assert RuntimeGateway._local_ollama_model_names(payload) == [
+        "llama-local:latest"
+    ]
+
+    gateway = RuntimeGateway(settings)
+    monkeypatch.setattr(
+        gateway,
+        "_available_local_ollama_models",
+        lambda: ["llama-local:latest"],
+    )
+    assert gateway.selection() == {
+        "provider": "ollama",
+        "model": "llama-local:latest",
+        "reasoning_effort": "none",
+    }
+
+
 def test_codex_discovery_requires_authentication(settings, monkeypatch):
     gateway = RuntimeGateway(settings)
     monkeypatch.setattr(gateway, "_codex_executable", lambda: Path("/fake/codex"))

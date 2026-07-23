@@ -202,7 +202,10 @@ def infer_work_mode(location: str, explicit: Optional[str] = None) -> Optional[s
         normalized = re.sub(r"\s+", " ", value or "").strip().casefold()
         if not normalized:
             return None
-        if re.search(r"\bremote\b|\bwork[ -]from[ -]home\b|\bwfh\b", normalized):
+        if re.search(
+            r"\bremote\b|\bwork[ -]from[ -]home\b|\bwfh\b|\bhome[ -]based\b",
+            normalized,
+        ):
             return "remote"
         if re.search(r"\bhybrid\b", normalized):
             return "hybrid"
@@ -225,6 +228,10 @@ def infer_work_mode(location: str, explicit: Optional[str] = None) -> Optional[s
 
 def clean_description(*parts: Optional[str]) -> str:
     value = "\n".join(part for part in parts if part)
+    # Some official boards return HTML that has already been entity-escaped.
+    # Decode once before tag detection so matching never ranks literal &lt;li&gt;
+    # markup as job content.
+    value = html.unescape(value)
     if "<" in value and ">" in value:
         value = html_to_text(value)
     return sanitize_untrusted_text(re.sub(r"\n{3,}", "\n\n", value))

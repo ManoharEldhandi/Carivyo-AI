@@ -31,16 +31,19 @@ blocking or fabricating an AI result.
 **Status:** Accepted
 
 The first release implements Greenhouse, Lever, Ashby, and SmartRecruiters
-against their public job-board interfaces. A source catalog supplies board
+against their public job-board interfaces, plus the official Salesforce Careers
+export and Goldman Sachs Higher role-search API. A source catalog supplies board
 identifiers. Discovery and verification remain separate: only a connector-
 specific official response can label a job live. SmartRecruiters list
 pagination and detail verification expose explicit completeness metadata; a
 bounded partial response can add verified jobs but cannot close unseen jobs or
 claim exhaustive coverage.
 
-Generic crawling, browser-session sources, Workday, iCIMS, and similar
-tenant-specific adapters are deferred until canonicalization, retry behavior,
-timestamp semantics, and dead-link rates are measured on the enabled families.
+Generic crawling, authenticated browser-session sources, broad Workday/iCIMS
+tenant discovery, and similar adapters are deferred until canonicalization,
+retry behavior, timestamp semantics, and dead-link rates are measured. A custom
+company connector is enabled only when the employer publishes a stable,
+unauthenticated structured feed and a direct official application route.
 
 ## ADR-004 — Freshness Is Evidence, Not Inference
 
@@ -130,15 +133,22 @@ full-disk encryption.
 - Application-managed field encryption and encrypted backup archives.
 - Controlled Claude Code, Gemini CLI, and OpenCode adapters.
 
-## ADR-010 — Hard Search Contract Before Ranking
+## ADR-010 — Tri-State Search Eligibility Before Ranking
 
 **Status:** Accepted
 
-Target roles, ordered locations, Remote India scope, work modes, seniority,
-explicit exclusions, official-direct source policy, and the 48-hour cutoff are
-eligibility gates. A fit score can never compensate for a failed gate. Unknown
-or missing posting dates do not enter the default feed. Zero correct jobs is a
-valid successful result and is preferable to one irrelevant recommendation.
+Explicit exclusions, clearly foreign-only geography, senior scope, unsupported
+role families, and missing official-direct links are eligibility gates. A fit
+score can never compensate for those failures. Missing salary, work mode,
+employment type, or posting timestamp is instead unknown evidence: the job may
+enter the feed with a lower score and an explicit risk. Ordered locations and
+freshness are ranking signals unless a one-time instruction explicitly makes
+them strict.
+
+The normal plan expands saved target labels with adjacent role families proven
+by the active resume. Company-specific early-career aliases are scoped by
+employer, and ambiguous bare titles such as `Analyst` also require software or
+engineering evidence in the official description.
 
 Freshness is recomputed when the feed is read. Each successful complete board
 response also closes previously observed listings that disappeared from that
@@ -164,9 +174,11 @@ approval is bound to the analyzed JD and artifact hashes.
 
 The UI separates local data storage from AI processing location. It shows the
 resolved provider, exact model, reasoning profile, session reuse, and measured
-or estimated usage. Codex defaults to GPT-5.6 Terra at low reasoning for the
-balanced chat path; Luna and Sol remain explicit efficient and quality-first
-choices. Installed Ollama models are enumerated and validated server-side.
+or estimated usage. When an on-device Ollama model is installed, it is the
+fresh-install default. Otherwise Codex uses GPT-5.6 Terra at low reasoning for
+the balanced chat path; Luna and Sol remain explicit efficient and quality-first
+choices. Installed Ollama models are enumerated and validated server-side, and
+remote/cloud Ollama pointers are excluded from every capability labelled local.
 
 Changing provider or model invalidates provider-session reuse. If a selected
 model disappears, Carivyo reports the failure rather than silently choosing a
@@ -210,3 +222,30 @@ approval gate or implies vendor parity.
 Closing or refreshing Resume Studio restores the latest completed run for that
 job. Starting “New version” is explicit and creates a separate immutable run;
 it does not overwrite the restored run.
+
+## ADR-016 — Section-Complete Resume Design and Local Decision Support
+
+**Status:** Accepted
+
+PDF import uses the locally installed Poppler text extractor before the pypdf
+fallback, then merges physical wrapped lines into logical evidence claims.
+Recognized source sections include summary, experience, projects, skills,
+achievements, education, certifications, volunteer work, leadership,
+publications, and languages. A resume run re-normalizes only its selected,
+approved base inside the isolated workspace; it never mutates the active
+profile or imports another base's claims.
+
+Generation must retain at least one approved claim from every recognized source
+section. Page fitting removes low-value details only while a section has more
+than one claim; if the irreducible complete resume needs two pages, section
+completeness wins and the relaxation is reported explicitly.
+
+The MIT-licensed `interviewstreet/hiring-agent` informed an automatic local
+hiring-manager review. Carivyo replaces the upstream internship/GitHub-heavy
+rubric with five job-specific dimensions and supplies only approved claim IDs,
+requirements, section inventory, and the deterministic ATS score. The report
+runs only through an on-device Ollama model, is advisory, cannot change
+approval, and degrades to an explicit unavailable/failed state without blocking
+deterministic generation. The displayed composite is 75% deterministic evidence
+coverage and 25% local-model judgment; both component scores and the basis are
+returned so a small model cannot silently override verified evidence.

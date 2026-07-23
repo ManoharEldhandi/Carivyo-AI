@@ -14,8 +14,10 @@ from app.config import Settings
 from app.connectors import (
     AshbyConnector,
     FixtureConnector,
+    GoldmanSachsConnector,
     GreenhouseConnector,
     LeverConnector,
+    SalesforceConnector,
     SmartRecruitersConnector,
 )
 from app.connectors.base import (
@@ -27,6 +29,7 @@ from app.db import Database
 from app.observability import logger
 from app.security import UnsafeUrl, validate_outbound_url
 from app.services.matching import MatchingService
+from app.services.job_sources import SOURCE_CATALOG as OFFICIAL_SOURCE_CATALOG
 from app.services.profile import ProfileService
 from app.services.preference_intelligence import (
     LOCATION_ALIASES,
@@ -60,187 +63,103 @@ class DomainRequestPacer:
             wait_for = self.minimum_interval_seconds - elapsed
             if wait_for > 0:
                 await asyncio.sleep(wait_for)
-            try:
-                return await operation()
-            finally:
-                self._last_request[domain] = loop.time()
+            # Pace request starts without holding the per-domain lock for the
+            # entire network response. With dozens of official boards sharing an
+            # ATS API host, serializing response bodies made a search take minutes.
+            self._last_request[domain] = loop.time()
+        return await operation()
 
 
-SOURCE_CATALOG = [
-    {
-        "id": "greenhouse-phonepe",
-        "type": "greenhouse",
-        "name": "PhonePe",
-        "company": "PhonePe",
-        "domain": "boards-api.greenhouse.io",
-        "config": {"board_token": "phonepe"},
+SOURCE_CATALOG = OFFICIAL_SOURCE_CATALOG
+
+
+COMPANY_SPECIFIC_ROLE_ALIASES = {
+    "salesforce": {
+        "associate member of technical staff",
+        "amts",
+        "member of technical staff",
+        "mts",
     },
-    {
-        "id": "greenhouse-razorpay",
-        "type": "greenhouse",
-        "name": "Razorpay",
-        "company": "Razorpay",
-        "domain": "boards-api.greenhouse.io",
-        "config": {"board_token": "razorpaysoftwareprivatelimited"},
+    "goldman sachs": {
+        "new analyst",
+        "engineering analyst",
+        "software engineering analyst",
+        "technology analyst",
+        "analyst",
     },
-    {
-        "id": "greenhouse-stripe",
-        "type": "greenhouse",
-        "name": "Stripe",
-        "company": "Stripe",
-        "domain": "boards-api.greenhouse.io",
-        "config": {"board_token": "stripe"},
-        "apply_hosts": ["stripe.com"],
+    "jpmorgan": {"technology analyst", "software engineer program"},
+    "jp morgan": {"technology analyst", "software engineer program"},
+    "morgan stanley": {"technology analyst"},
+    "blackrock": {"technology analyst", "analyst"},
+    "citi": {"applications development programmer analyst", "technology analyst"},
+    "infosys": {
+        "specialist programmer",
+        "digital specialist engineer",
+        "systems engineer",
     },
-    {
-        "id": "greenhouse-postman",
-        "type": "greenhouse",
-        "name": "Postman",
-        "company": "Postman",
-        "domain": "boards-api.greenhouse.io",
-        "config": {"board_token": "postman"},
-    },
-    {
-        "id": "greenhouse-rubrik",
-        "type": "greenhouse",
-        "name": "Rubrik",
-        "company": "Rubrik",
-        "domain": "boards-api.greenhouse.io",
-        "config": {"board_token": "rubrik"},
-    },
-    {
-        "id": "greenhouse-databricks",
-        "type": "greenhouse",
-        "name": "Databricks",
-        "company": "Databricks",
-        "domain": "boards-api.greenhouse.io",
-        "config": {"board_token": "databricks"},
-    },
-    {
-        "id": "greenhouse-mongodb",
-        "type": "greenhouse",
-        "name": "MongoDB",
-        "company": "MongoDB",
-        "domain": "boards-api.greenhouse.io",
-        "config": {"board_token": "mongodb"},
-    },
-    {
-        "id": "greenhouse-cloudflare",
-        "type": "greenhouse",
-        "name": "Cloudflare",
-        "company": "Cloudflare",
-        "domain": "boards-api.greenhouse.io",
-        "config": {"board_token": "cloudflare"},
-    },
-    {
-        "id": "greenhouse-twilio",
-        "type": "greenhouse",
-        "name": "Twilio",
-        "company": "Twilio",
-        "domain": "boards-api.greenhouse.io",
-        "config": {"board_token": "twilio"},
-    },
-    {
-        "id": "greenhouse-gitlab",
-        "type": "greenhouse",
-        "name": "GitLab",
-        "company": "GitLab",
-        "domain": "boards-api.greenhouse.io",
-        "config": {"board_token": "gitlab"},
-    },
-    {
-        "id": "greenhouse-canonical",
-        "type": "greenhouse",
-        "name": "Canonical",
-        "company": "Canonical",
-        "domain": "boards-api.greenhouse.io",
-        "config": {"board_token": "canonical"},
-    },
-    {
-        "id": "greenhouse-netskope",
-        "type": "greenhouse",
-        "name": "Netskope",
-        "company": "Netskope",
-        "domain": "boards-api.greenhouse.io",
-        "config": {"board_token": "netskope"},
-    },
-    {
-        "id": "greenhouse-okta",
-        "type": "greenhouse",
-        "name": "Okta",
-        "company": "Okta",
-        "domain": "boards-api.greenhouse.io",
-        "config": {"board_token": "okta"},
-    },
-    {
-        "id": "greenhouse-elastic",
-        "type": "greenhouse",
-        "name": "Elastic",
-        "company": "Elastic",
-        "domain": "boards-api.greenhouse.io",
-        "config": {"board_token": "elastic"},
-    },
-    {
-        "id": "greenhouse-cockroach-labs",
-        "type": "greenhouse",
-        "name": "Cockroach Labs",
-        "company": "Cockroach Labs",
-        "domain": "boards-api.greenhouse.io",
-        "config": {"board_token": "cockroachlabs"},
-    },
-    {
-        "id": "lever-binance",
-        "type": "lever",
-        "name": "Binance",
-        "company": "Binance",
-        "domain": "api.lever.co",
-        "config": {"site": "binance"},
-    },
-    {
-        "id": "lever-spotify",
-        "type": "lever",
-        "name": "Spotify",
-        "company": "Spotify",
-        "domain": "api.lever.co",
-        "config": {"site": "spotify"},
-    },
-    {
-        "id": "ashby-openai",
-        "type": "ashby",
-        "name": "OpenAI",
-        "company": "OpenAI",
-        "domain": "api.ashbyhq.com",
-        "config": {"board": "openai"},
-    },
-    {
-        "id": "ashby-notion",
-        "type": "ashby",
-        "name": "Notion",
-        "company": "Notion",
-        "domain": "api.ashbyhq.com",
-        "config": {"board": "notion"},
-    },
-    {
-        "id": "smartrecruiters-bosch-india-software",
-        "type": "smartrecruiters",
-        "name": "Bosch India software roles",
-        "company": "Bosch Global Software Technologies",
-        "domain": "api.smartrecruiters.com",
-        "config": {
-            "company_identifier": "BoschGroup",
-            "country": "in",
-            "q": "software",
-            "limit": 100,
-            "detail_limit": 40,
-        },
-    },
-]
+    "tata consultancy services": {"assistant system engineer", "graduate engineer trainee"},
+    "tcs": {"assistant system engineer", "graduate engineer trainee"},
+    "wipro": {"project engineer"},
+    "cognizant": {"programmer analyst trainee", "genc"},
+    "accenture": {"associate software engineer", "application development associate"},
+    "capgemini": {"analyst", "software engineer"},
+    "hcl": {"graduate engineer trainee"},
+    "oracle": {"applications developer 1", "software developer 1"},
+}
+
+SOFTWARE_SCOPE_TERMS = {
+    "api",
+    "backend",
+    "cloud",
+    "code",
+    "coding",
+    "computer science",
+    "developer",
+    "development",
+    "devops",
+    "engineering",
+    "frontend",
+    "full stack",
+    "generative ai",
+    "infrastructure",
+    "java",
+    "javascript",
+    "llm",
+    "machine learning",
+    "ml",
+    "platform",
+    "python",
+    "software",
+    "systems",
+}
+
+INDIA_LOCATION_MARKERS = {
+    "ahmedabad",
+    "bangalore",
+    "bengaluru",
+    "chandigarh",
+    "chennai",
+    "coimbatore",
+    "delhi",
+    "gurgaon",
+    "gurugram",
+    "hyderabad",
+    "india",
+    "indore",
+    "jaipur",
+    "kochi",
+    "kolkata",
+    "mumbai",
+    "noida",
+    "pune",
+}
 
 APPLY_HOSTS = {
     "greenhouse": {"job-boards.greenhouse.io", "boards.greenhouse.io"},
     "lever": {"jobs.lever.co"},
     "ashby": {"jobs.ashbyhq.com"},
     "smartrecruiters": {"jobs.smartrecruiters.com", "careers.smartrecruiters.com"},
+    "company_portal": set(),
     "fixture": {"jobs.example.com"},
     "manual": set(),
 }
@@ -254,6 +173,7 @@ SOURCE_HOSTS = {
         "jobs.smartrecruiters.com",
         "careers.smartrecruiters.com",
     },
+    "company_portal": {"higher.gs.com", "a.sfdcstatic.com"},
     "fixture": {"jobs.example.com"},
     "manual": set(),
 }
@@ -292,6 +212,38 @@ def allowed_source_hosts(
         hosts.add(source["domain"])
         hosts.update(source.get("source_hosts", []))
     return hosts
+
+
+def validate_official_candidate_url(url: str, allowed_hosts: set[str]) -> str:
+    """Validate ATS links while permitting official boards to use custom domains."""
+
+    parsed = urlparse(url)
+    hostname = (parsed.hostname or "").rstrip(".").casefold()
+    known_host = any(
+        hostname == host.casefold() or hostname.endswith("." + host.casefold())
+        for host in allowed_hosts
+    )
+    if known_host:
+        return validate_outbound_url(
+            url,
+            allowed_hosts=allowed_hosts,
+            resolve_dns=False,
+        )
+    if parsed.scheme != "https":
+        raise UnsafeUrl("Custom official application hosts must use HTTPS")
+    # Custom domains come directly from the official ATS payload. DNS validation
+    # keeps those links useful (Okta and Stripe are examples) without opening SSRF
+    # access to loopback, private, link-local, or metadata-network destinations.
+    return validate_outbound_url(url, allowed_hosts=None, resolve_dns=True)
+
+
+def upgrade_official_url(url: str) -> str:
+    """Prefer the HTTPS form of an official ATS-provided application route."""
+
+    parsed = urlparse(url)
+    if parsed.scheme == "http" and parsed.hostname:
+        return parsed._replace(scheme="https").geturl()
+    return url
 
 
 class SearchService:
@@ -722,6 +674,10 @@ class SearchService:
                 connectors.append(AshbyConnector(*args))
             elif source["type"] == "smartrecruiters":
                 connectors.append(SmartRecruitersConnector(*args))
+            elif source["type"] == "salesforce":
+                connectors.append(SalesforceConnector(*args))
+            elif source["type"] == "goldman":
+                connectors.append(GoldmanSachsConnector(*args))
         return connectors
 
     def _filter_candidates(
@@ -755,14 +711,26 @@ class SearchService:
             if normalized_alias and normalized_alias not in aliases:
                 aliases.append(normalized_alias)
         role_match = any(self._role_alias_matches(title, alias) for alias in aliases)
+        if plan.get("role_policy", "strict") == "expanded_early_career":
+            role_match = role_match or self._company_role_matches(candidate)
         if not role_match:
             reasons.append("role_outside_policy")
 
-        if not self._location_allowed(candidate, plan):
+        location_policy = plan.get("location_policy", "strict")
+        if location_policy == "strict" and not self._location_allowed(candidate, plan):
+            reasons.append("location_outside_policy")
+        elif location_policy != "strict" and self._location_hard_conflict(candidate, plan):
             reasons.append("location_outside_policy")
 
         work_modes = plan.get("work_modes", [])
-        if work_modes and candidate.work_mode not in work_modes:
+        metadata_policy = plan.get("metadata_policy", "strict")
+        if (
+            work_modes
+            and candidate.work_mode
+            and candidate.work_mode not in work_modes
+        ) or (
+            work_modes and not candidate.work_mode and metadata_policy == "strict"
+        ):
             reasons.append("work_mode_outside_policy")
 
         employment_types = plan.get("employment_types", [])
@@ -770,7 +738,12 @@ class SearchService:
             candidate_employment = self._canonical_employment_type(
                 candidate.employment_type
             )
-            if not candidate_employment or candidate_employment not in employment_types:
+            if (
+                candidate_employment
+                and candidate_employment not in employment_types
+            ) or (
+                not candidate_employment and metadata_policy == "strict"
+            ):
                 reasons.append("employment_type_outside_policy")
 
         excluded = [
@@ -798,12 +771,13 @@ class SearchService:
         if self._seniority_outside_policy(candidate, plan):
             reasons.append("seniority_outside_policy")
 
-        freshness = classify_freshness(candidate.posted_at, live=True)
-        if freshness == "live_date_unverified" or not self._within_freshness_window(
-            candidate.posted_at,
-            int(plan.get("freshness_hours", 48)),
-        ):
-            reasons.append("freshness_outside_policy")
+        if plan.get("freshness_policy", "strict") == "strict":
+            freshness = classify_freshness(candidate.posted_at, live=True)
+            if freshness == "live_date_unverified" or not self._within_freshness_window(
+                candidate.posted_at,
+                int(plan.get("freshness_hours", 48)),
+            ):
+                reasons.append("freshness_outside_policy")
 
         if candidate.source_family not in plan.get("source_families", []):
             reasons.append("source_outside_policy")
@@ -860,6 +834,27 @@ class SearchService:
             }
         )
 
+    @classmethod
+    def _company_role_matches(cls, candidate: JobCandidate) -> bool:
+        title = normalize_space(candidate.title).casefold()
+        company = normalize_space(candidate.company).casefold()
+        description = normalize_space(candidate.description).casefold()
+        for company_name, aliases in COMPANY_SPECIFIC_ROLE_ALIASES.items():
+            if not cls._contains_phrase(company, company_name):
+                continue
+            for alias in aliases:
+                if not cls._contains_phrase(title, alias):
+                    continue
+                # A bare analyst title is meaningful at several employers, but it
+                # must still prove an engineering/software scope in the official JD.
+                if alias == "analyst" and not any(
+                    cls._contains_phrase(f"{title} {description}", term)
+                    for term in SOFTWARE_SCOPE_TERMS
+                ):
+                    continue
+                return True
+        return False
+
     @staticmethod
     def _contains_phrase(haystack: str, phrase: str) -> bool:
         normalized_phrase = normalize_space(phrase).casefold()
@@ -892,6 +887,45 @@ class SearchService:
             ):
                 return True
         return False
+
+    @staticmethod
+    def _location_hard_conflict(candidate: JobCandidate, plan: Dict[str, Any]) -> bool:
+        """Reject explicit exclusions and obvious foreign-only roles, not unknowns."""
+
+        location = normalize_space(candidate.location).casefold()
+        if not location:
+            return False
+        for excluded in plan.get("excluded_locations", []):
+            canonical = canonical_location(str(excluded))
+            aliases = LOCATION_ALIASES.get(canonical, (canonical.casefold(),))
+            if any(SearchService._contains_phrase(location, alias) for alias in aliases):
+                return True
+
+        preferences = [canonical_location(str(value)) for value in plan.get("locations", [])]
+        india_scoped = any(
+            value in {"India", "Remote India", "Hyderabad", "Bengaluru"}
+            for value in preferences
+        )
+        if not india_scoped:
+            return False
+        if any(
+            SearchService._contains_phrase(location, marker)
+            for marker in INDIA_LOCATION_MARKERS
+        ):
+            return False
+        if (candidate.work_mode or "").casefold() == "remote":
+            if location in {"remote", "home based", "unspecified", "multiple locations"}:
+                return False
+            if any(
+                SearchService._contains_phrase(location, marker)
+                for marker in ("worldwide", "global", "apac", "asia")
+            ):
+                return False
+        if location in {"unspecified", "multiple locations", "various locations"}:
+            return False
+        # Once a posting states a concrete non-India location, it is a real
+        # geography conflict rather than missing metadata.
+        return True
 
     @staticmethod
     def _location_matches_preference(
@@ -927,22 +961,37 @@ class SearchService:
         max_years = SearchService._maximum_seniority_years(
             str(plan.get("seniority_tolerance") or "")
         )
+        title = candidate.title.casefold()
+        senior_title = bool(
+            re.search(
+                r"\b(?:senior|sr\.?|staff|principal|lead|manager|director|architect|"
+                r"vice president|executive director|pmts|lmts|smts)\b",
+                title,
+            )
+        )
+        if (
+            SearchService._contains_phrase(candidate.company, "goldman sachs")
+            and normalize_space(str(candidate.raw.get("corporateTitle") or "")).casefold()
+            not in {"", "analyst"}
+        ):
+            return True
+        early_career = plan.get("seniority_policy") == "early_career"
+        if early_career and (
+            senior_title
+            or re.search(r"\b(?:sde|engineer|developer)\s*(?:iii|iv|v|3|4|5)\b", title)
+        ):
+            return True
         if max_years is None:
             return False
         required_years = SearchService._minimum_required_experience(
             candidate.description
         )
-        if required_years is not None and required_years > max_years:
+        effective_max_years = min(max_years, 3) if early_career else max_years
+        if required_years is not None and required_years > effective_max_years:
             return True
         if max_years > 4:
             return False
-        title = candidate.title.casefold()
-        return bool(
-            re.search(
-                r"\b(?:senior|sr\.?|staff|principal|lead|manager|director|architect)\b",
-                title,
-            )
-        )
+        return senior_title
 
     @staticmethod
     def _maximum_seniority_years(tolerance: str) -> Optional[int]:
@@ -969,7 +1018,8 @@ class SearchService:
         values: List[int] = []
         occupied: List[Tuple[int, int]] = []
         experience_suffix = (
-            r"\s*(?:of\s+)?(?:[a-z0-9+#./-]+\s+){0,5}experience\b"
+            r"\s*(?:of\s+)?(?:[a-z0-9+#./-]+\s+){0,8}"
+            r"(?:experience|engineering|development|building|working)\b"
         )
         range_pattern = re.compile(
             rf"\b(\d{{1,2}})\s*(?:-|–|—|to)\s*(\d{{1,2}})"
@@ -1007,7 +1057,7 @@ class SearchService:
                 value = int(match.group(1))
                 if value < 50:
                     values.append(value)
-        return max(values) if values else None
+        return min(values) if values else None
 
     @staticmethod
     def _within_freshness_window(
@@ -1052,34 +1102,29 @@ class SearchService:
     ) -> Tuple[str, str]:
         if not candidate.apply_url:
             raise ValueError("Official apply URL is missing")
+        candidate.apply_url = upgrade_official_url(candidate.apply_url)
         hosts = allowed_apply_hosts(
             candidate.connector_id,
             candidate.source_family,
             fixture_jobs_enabled=bool(self.settings.fixture_jobs_path),
         )
-        validate_outbound_url(
-            candidate.apply_url,
-            allowed_hosts=hosts or None,
-            resolve_dns=False,
-        )
+        validate_official_candidate_url(candidate.apply_url, hosts)
         if not candidate.source_url:
             raise ValueError("Official source URL is missing")
+        candidate.source_url = upgrade_official_url(candidate.source_url)
         source_hosts = allowed_source_hosts(
             candidate.connector_id,
             candidate.source_family,
             fixture_jobs_enabled=bool(self.settings.fixture_jobs_path),
         )
-        validate_outbound_url(
-            candidate.source_url,
-            allowed_hosts=source_hosts or None,
-            resolve_dns=False,
-        )
+        validate_official_candidate_url(candidate.source_url, source_hosts)
         freshness = classify_freshness(candidate.posted_at, live=True)
-        if freshness == "live_date_unverified" or not self._within_freshness_window(
-            candidate.posted_at,
-            int(plan.get("freshness_hours", 48)),
-        ):
-            raise ValueError("Job is outside the active freshness contract")
+        if plan.get("freshness_policy", "strict") == "strict":
+            if freshness == "live_date_unverified" or not self._within_freshness_window(
+                candidate.posted_at,
+                int(plan.get("freshness_hours", 48)),
+            ):
+                raise ValueError("Job is outside the active freshness contract")
         canonical_key = self._canonical_key(candidate)
         existing = self.database.fetch_one(
             "SELECT id FROM jobs WHERE connector_id = ? AND external_id = ?",
@@ -1095,6 +1140,8 @@ class SearchService:
             "location": normalize_space(candidate.location),
             "work_mode": candidate.work_mode,
             "posted_at": candidate.posted_at,
+            "employment_type": candidate.employment_type,
+            "salary": self._extract_salary(candidate),
         }
         match = self.matching.score(job, freshness, plan)
         with self.database.transaction() as connection:
@@ -1104,8 +1151,8 @@ class SearchService:
                     id, connector_id, external_id, canonical_key, title, company,
                     description, description_hash, location, work_mode,
                     employment_type, posted_at, posted_semantics, apply_url,
-                    source_url, source_family, raw_path
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    source_url, source_family, salary_json, raw_path
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(connector_id, external_id) DO UPDATE SET
                     canonical_key = excluded.canonical_key,
                     title = excluded.title,
@@ -1120,6 +1167,7 @@ class SearchService:
                     apply_url = excluded.apply_url,
                     source_url = excluded.source_url,
                     source_family = excluded.source_family,
+                    salary_json = excluded.salary_json,
                     raw_path = excluded.raw_path,
                     last_seen_at = CURRENT_TIMESTAMP
                 """,
@@ -1140,6 +1188,7 @@ class SearchService:
                     candidate.apply_url,
                     candidate.source_url,
                     candidate.source_family,
+                    json_dumps(job["salary"]) if job["salary"] else None,
                     str(raw_path),
                 ),
             )
@@ -1226,6 +1275,29 @@ class SearchService:
             )
         return job_id, freshness
 
+    @staticmethod
+    def _extract_salary(candidate: JobCandidate) -> Optional[Dict[str, Any]]:
+        """Keep source-provided compensation when present; absence stays unknown."""
+
+        raw = candidate.raw if isinstance(candidate.raw, dict) else {}
+        for key in ("salaryRange", "salary", "compensation"):
+            value = raw.get(key)
+            if isinstance(value, dict) and value:
+                result = {
+                    field: value.get(field)
+                    for field in ("min", "max", "currency", "interval", "period")
+                    if value.get(field) is not None
+                }
+                if result:
+                    return result
+            if isinstance(value, str) and normalize_space(value):
+                return {"text": normalize_space(value)}
+        for key in ("compensationTierSummary", "salaryDescription"):
+            value = raw.get(key)
+            if isinstance(value, str) and normalize_space(value):
+                return {"text": normalize_space(value)}
+        return None
+
     def run_status(self, run_id: str) -> Dict[str, Any]:
         row = self.database.fetch_one(
             "SELECT * FROM search_runs WHERE id = ?",
@@ -1311,9 +1383,9 @@ class SearchService:
 
         jobs.sort(
             key=lambda job: (
+                -float(job["score"]),
                 location_index(job),
                 freshness_order.get(job["freshness_class"], 9),
-                -float(job["score"]),
                 -posted_timestamp(job),
             )
         )
@@ -1332,6 +1404,9 @@ class SearchService:
             "freshness_hours": int(plan.get("freshness_hours", 48)),
             "location_policy": plan.get("location_policy", "strict"),
             "role_policy": plan.get("role_policy", "strict"),
+            "freshness_policy": plan.get("freshness_policy", "strict"),
+            "metadata_policy": plan.get("metadata_policy", "strict"),
+            "seniority_policy": plan.get("seniority_policy", "strict"),
             "source_policy": plan.get("source_policy", "official_direct"),
             "temporary_override": plan.get("temporary_override"),
         }
@@ -1375,11 +1450,12 @@ class SearchService:
         if job.get("live_state") != "live":
             return False
         freshness = classify_freshness(job.get("posted_at"), live=True)
-        if freshness == "live_date_unverified" or not self._within_freshness_window(
-            job.get("posted_at"),
-            int(plan.get("freshness_hours", 48)),
-        ):
-            return False
+        if plan.get("freshness_policy", "strict") == "strict":
+            if freshness == "live_date_unverified" or not self._within_freshness_window(
+                job.get("posted_at"),
+                int(plan.get("freshness_hours", 48)),
+            ):
+                return False
         job["freshness_class"] = freshness
         candidate = JobCandidate(
             connector_id=job["connector_id"],
@@ -1517,25 +1593,23 @@ class SearchService:
             )
             return self.get_job(job_id)
 
-        validate_outbound_url(
+        current.apply_url = upgrade_official_url(current.apply_url)
+        current.source_url = upgrade_official_url(current.source_url)
+        validate_official_candidate_url(
             current.apply_url,
-            allowed_hosts=allowed_apply_hosts(
+            allowed_apply_hosts(
                 current.connector_id,
                 current.source_family,
                 fixture_jobs_enabled=bool(self.settings.fixture_jobs_path),
-            )
-            or None,
-            resolve_dns=False,
+            ),
         )
-        validate_outbound_url(
+        validate_official_candidate_url(
             current.source_url,
-            allowed_hosts=allowed_source_hosts(
+            allowed_source_hosts(
                 current.connector_id,
                 current.source_family,
                 fixture_jobs_enabled=bool(self.settings.fixture_jobs_path),
-            )
-            or None,
-            resolve_dns=False,
+            ),
         )
         previous_hash = job["description_hash"]
         new_hash = stable_hash(current.description)
@@ -1625,6 +1699,10 @@ class SearchService:
             return AshbyConnector(*args)
         if source["type"] == "smartrecruiters":
             return SmartRecruitersConnector(*args)
+        if source["type"] == "salesforce":
+            return SalesforceConnector(*args)
+        if source["type"] == "goldman":
+            return GoldmanSachsConnector(*args)
         return None
 
     def feedback(self, job_id: str, action: str, reason: Optional[str]) -> Dict[str, Any]:

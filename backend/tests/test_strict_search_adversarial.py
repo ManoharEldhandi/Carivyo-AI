@@ -281,6 +281,7 @@ def test_ambiguous_locations_are_not_inferred_as_onsite():
     assert infer_work_mode("Office Park, Hyderabad") is None
     assert infer_work_mode("Hyderabad", "office-based") == "onsite"
     assert infer_work_mode("Remote - India", "Full-time") == "remote"
+    assert infer_work_mode("Home based - Worldwide") == "remote"
 
 
 def queue_run(search, plan: Dict[str, Any]) -> str:

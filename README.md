@@ -8,8 +8,10 @@ workflow.
 
 The product is a React/TypeScript SPA backed by a FastAPI modular monolith and
 SQLite. It runs on loopback, keeps personal artifacts on the local machine, and
-can use an existing Codex CLI session or local Ollama model for open-ended chat.
-With Codex, compact task context is processed by the selected provider through
+can use an existing Codex CLI session or an on-device Ollama model. When a
+local Ollama model is installed, new profiles default to it for chat and
+Carivyo's advisory hiring-manager review. Ollama cloud pointers are excluded
+from every path labelled local. With Codex, compact task context is processed by the selected provider through
 the installed CLI while Carivyo's records stay local. With Ollama, both stored
 records and model inference remain on the device. Turning AI off keeps the
 deterministic extraction, filtering, matching, and ATS paths available.
@@ -19,11 +21,16 @@ deterministic extraction, filtering, matching, and ATS paths available.
 - Near-zero-configuration onboarding from PDF, DOCX, TeX, Markdown, or text.
 - Adaptive questions that resolve only high-impact uncertainty.
 - Greenhouse, Lever, Ashby, and SmartRecruiters connectors with pagination,
-  bounded detail verification, an extensible catalog of official company
-  boards, and direct-application provenance.
-- A strict search contract: role, ordered location scope, work mode, seniority,
-  official source, and the default 48-hour cutoff are eligibility gates before
-  ranking. Zero correct jobs is treated as better than irrelevant padding.
+  bounded detail verification, 120 audited official company boards, custom
+  company application-domain validation, and direct-application provenance.
+- Tri-state job eligibility: explicit exclusions, clearly incompatible
+  geography, senior scope, and missing official links remain hard gates;
+  missing salary/date/work-mode/employment metadata stays eligible with visible
+  uncertainty. Locations and freshness are ranked preferences by default, while
+  one-time instructions can still enforce strict scope.
+- Resume-supported role expansion covers software/backend, AI/LLM, applied ML,
+  and company-specific early-career titles such as AMTS, engineering analyst,
+  programmer analyst, graduate engineer trainee, and applications developer.
 - Editable profile priorities, natural-language preference routing, explicit
   resume replacement, and one-time search overrides that never mutate saved
   priorities.
@@ -36,6 +43,13 @@ deterministic extraction, filtering, matching, and ATS paths available.
   approval is blocked if the analyzed artifacts change. Resume Studio restores
   the latest saved job-specific run after closing or refreshing, while “New
   version” starts a separate immutable run.
+- Poppler-based PDF extraction preserves whitespace and merges wrapped bullets.
+  Every recognized source section is retained as a blocking generation gate;
+  page fitting can remove redundant details but cannot erase an entire section.
+  A job-specific, explainable hiring-manager simulation adapted from the
+  MIT-licensed `interviewstreet/hiring-agent` runs through on-device Ollama when
+  available and remains advisory. Its displayed composite is anchored 75% to
+  deterministic evidence coverage and 25% to the local-model judgment.
 - User-controlled application handoff and pipeline tracking. Carivyo does not
   submit applications automatically.
 - Downloadable local backup/JSON export and deletion controls, strict artifact
@@ -161,13 +175,16 @@ reconstruction is not claimed.
 Read the [problem definition](problem.md), [system architecture](system.md),
 and [architecture decisions](docs/architecture-decisions.md) for the complete
 design. Security reports should follow [SECURITY.md](SECURITY.md).
+Third-party attributions are recorded in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## Project status
 
 Carivyo is a tested local single-user website, not a hosted multi-user service
 and not yet a production-readiness claim. Official source coverage currently
-includes Greenhouse, Lever, Ashby, and SmartRecruiters. The default catalog is
-curated rather than exhaustive, and a SmartRecruiters board is explicitly
+includes 120 curated company boards across Greenhouse, Lever, Ashby,
+SmartRecruiters, Salesforce Careers, and Goldman Sachs Higher. The catalog is
+broad rather than exhaustive, and a SmartRecruiters board is explicitly
 reported as partial whenever its bounded detail-verification budget cannot
 cover every listing. Broader connectors, application-managed encryption,
 encrypted backups, distribution hardening, and controlled adapters for

@@ -92,6 +92,12 @@ validators before involving a model. If a model improves wording, pass only
 the bounded requirement-evidence map and approved claims; revalidate every
 output claim.
 
+Normalize PDF whitespace and wrapped bullets inside the isolated run before
+selection. Preserve every recognized section from the approved selected base.
+Page fitting may remove a detail only while another claim remains in that
+section; report an explicit two-page relaxation when completeness cannot fit on
+one page.
+
 Create an A4, single-column TeX design source. When Tectonic is available,
 compile the exact source in untrusted mode and allow formatting-only editing.
 If an independent PDF fallback is required, label its provenance and disable
@@ -110,6 +116,14 @@ frozen JD. It applies 27 deterministic checks across seven categories and
 returns transparent weights, evidence, and fixes. It requires no subscription
 and must not claim to reproduce any third-party proprietary score. Treat the
 score as diagnostic: there is no universal ATS score.
+
+When an on-device Ollama model is available, run the bounded local hiring-manager
+simulation against approved claim IDs, the requirement map, section inventory,
+and deterministic score. Treat its output as advisory decision support only. It
+must not approve or reject the candidate, alter claims, infer protected traits,
+use an Ollama cloud pointer, or block deterministic generation when unavailable.
+Expose the displayed score as 75% deterministic evidence coverage and 25% raw
+local-model judgment, with both component scores visible in the result.
 
 When the user explicitly selects Enhancv and confirms external processing, the
 orchestrator may send only the exact current PDF and frozen JD through the

@@ -193,7 +193,11 @@ def test_confirm_activates_reviewed_version_only_and_preserves_preferences(clien
     assert plan["plan"]["generated_from"]["preference_version"] == before[
         "preferences"
     ]["version"]
-    assert plan["plan"]["target_roles"] == ["Backend Engineer", "SDE I"]
+    assert plan["plan"]["target_roles"] == [
+        "Backend Engineer",
+        "SDE I",
+        "Backend Platform Engineer",
+    ]
     assert plan["plan"]["skills"] == reviewed["skills"]
     assert database.fetch_one(
         "SELECT status FROM search_plans WHERE version = ?",

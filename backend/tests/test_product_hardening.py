@@ -59,7 +59,7 @@ def strict_plan() -> dict:
     }
 
 
-def test_legacy_search_plan_shapes_are_normalized_without_broadening():
+def test_legacy_search_plan_shapes_gain_safe_ranked_defaults():
     plan = normalize_search_plan(
         {
             "target_roles": ["Backend Engineer"],
@@ -73,8 +73,10 @@ def test_legacy_search_plan_shapes_are_normalized_without_broadening():
     assert plan["locations"] == ["Hyderabad", "Remote India"]
     assert plan["work_modes"] == ["remote", "hybrid"]
     assert plan["freshness_hours"] == 48
-    assert plan["location_policy"] == "strict"
-    assert plan["role_policy"] == "strict"
+    assert plan["location_policy"] == "preference_order"
+    assert plan["role_policy"] == "expanded_early_career"
+    assert plan["freshness_policy"] == "ranking"
+    assert plan["metadata_policy"] == "include_unknown"
 
 
 def test_onboarding_interprets_ranked_locations_and_modes_semantically():
@@ -248,8 +250,9 @@ def test_jobs_api_exposes_enforced_contract_and_rejection_coverage(client):
     complete_onboarding(client, RESUME)
     payload = client.get("/api/jobs").json()
 
-    assert payload["contract"]["location_policy"] == "strict"
-    assert payload["contract"]["role_policy"] == "strict"
+    assert payload["contract"]["location_policy"] == "preference_order"
+    assert payload["contract"]["role_policy"] == "expanded_early_career"
+    assert payload["contract"]["freshness_policy"] == "ranking"
     assert payload["contract"]["freshness_hours"] == 48
     assert payload["contract"]["source_policy"] == "official_direct"
     assert payload["latest_run"]["status"] == "complete"

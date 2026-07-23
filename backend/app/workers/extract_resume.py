@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import resource
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -18,6 +20,17 @@ def apply_limits() -> None:
 
 def extract(path: Path, kind: str) -> str:
     if kind == "pdf":
+        pdftotext = shutil.which("pdftotext")
+        if pdftotext:
+            result = subprocess.run(
+                [pdftotext, "-layout", "-nopgbrk", str(path), "-"],
+                capture_output=True,
+                text=True,
+                timeout=15,
+                check=False,
+            )
+            if result.returncode == 0 and len(result.stdout.strip()) >= 40:
+                return result.stdout
         from pypdf import PdfReader
 
         reader = PdfReader(str(path), strict=False)

@@ -37,6 +37,8 @@ class Settings(BaseSettings):
     api_requests_per_minute: int = 600
     fixture_jobs_path: Optional[Path] = None
     codex_model: str = "gpt-5.6-terra"
+    ollama_model: Optional[str] = None
+    local_hiring_agent_enabled: bool = True
     enhancv_email: Optional[str] = None
     enhancv_password: Optional[SecretStr] = None
     enhancv_use_keychain: bool = False

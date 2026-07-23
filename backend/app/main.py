@@ -52,6 +52,7 @@ from app.services.ats_semantic import ATSSemanticReviewService, SemanticReviewIn
 from app.services.backup import BackupService
 from app.services.chat import ChatService
 from app.services.enhancv import EnhancvATSService, EnhancvUnavailable
+from app.services.hiring_agent import LocalHiringAgent
 from app.services.matching import MatchingService
 from app.services.onboarding import OnboardingService
 from app.services.preferences import PreferenceService
@@ -76,6 +77,7 @@ class Container:
     matching: MatchingService
     search: SearchService
     runtime: RuntimeGateway
+    hiring_agent: LocalHiringAgent
     ats_semantic: ATSSemanticReviewService
     chat: ChatService
     resumes: ResumeService
@@ -169,6 +171,11 @@ def build_container(settings: Settings) -> Container:
     matching = MatchingService(profiles)
     search = SearchService(settings, database, vault, profiles, plans, matching)
     runtime = RuntimeGateway(settings, database)
+    hiring_agent = LocalHiringAgent(
+        database,
+        runtime,
+        enabled=settings.local_hiring_agent_enabled,
+    )
     ats_semantic = ATSSemanticReviewService(database, runtime)
     chat = ChatService(
         database,
@@ -178,7 +185,7 @@ def build_container(settings: Settings) -> Container:
         runtime,
         settings.max_chat_input_tokens,
     )
-    resumes = ResumeService(database, vault, profiles, search)
+    resumes = ResumeService(database, vault, profiles, search, hiring_agent)
     enhancv = EnhancvATSService(settings, database, vault)
     applications = ApplicationService(database, search, resumes)
     backup = BackupService(settings, database)
@@ -195,6 +202,7 @@ def build_container(settings: Settings) -> Container:
         matching=matching,
         search=search,
         runtime=runtime,
+        hiring_agent=hiring_agent,
         ats_semantic=ats_semantic,
         chat=chat,
         resumes=resumes,
