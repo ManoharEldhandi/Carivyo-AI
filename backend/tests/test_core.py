@@ -217,6 +217,71 @@ async def test_goldman_official_graphql_parses_india_analyst_roles():
     assert result[0].apply_url == "https://higher.gs.com/roles/12345"
 
 
+@pytest.mark.asyncio
+async def test_goldman_revalidation_fetches_full_official_role_description():
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        assert payload["operationName"] == "GetRoleById"
+        assert payload["variables"] == {
+            "externalSourceId": "165704",
+            "externalSourceFetch": True,
+        }
+        return httpx.Response(
+            200,
+            json={
+                "data": {
+                    "role": {
+                        "roleId": "165704_GS_MID_CAREER",
+                        "corporateTitle": "Analyst",
+                        "jobTitle": "Engineering - Data Platform - Analyst - Bengaluru",
+                        "jobFunction": "Software Engineering",
+                        "division": "Engineering",
+                        "descriptionHtml": (
+                            "<h2>Responsibilities</h2><p>Build reliable Python services "
+                            "and data pipelines with engineering partners.</p>"
+                            "<h2>Qualifications</h2><p>Experience with SQL, cloud "
+                            "platforms, testing, and production support is required.</p>"
+                        ),
+                        "skillset": None,
+                        "locations": [
+                            {
+                                "primary": True,
+                                "city": "Bengaluru",
+                                "state": "Karnataka",
+                                "country": "India",
+                            }
+                        ],
+                        "jobType": {"description": "Full time"},
+                        "compensation": None,
+                        "applyActive": True,
+                        "status": "POSTED",
+                        "externalSource": {
+                            "externalApplicationUrl": "https://example.invalid/apply",
+                            "applyInExternalSource": True,
+                            "sourceId": "165704",
+                            "secondarySourceId": "secondary",
+                        },
+                    }
+                }
+            },
+        )
+
+    connector = GoldmanSachsConnector(
+        "goldman-sachs-higher",
+        "Goldman Sachs Higher",
+        "Goldman Sachs",
+        {"graphql_url": "https://api-higher.gs.com/gateway/api/v1/graphql"},
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        job = await connector.fetch_job(client, "165704_GS_MID_CAREER")
+
+    assert job is not None
+    assert len(job.description) > 150
+    assert "Qualifications" in job.description
+    assert job.external_id == "165704_GS_MID_CAREER"
+    assert job.apply_url == "https://higher.gs.com/roles/165704_GS_MID_CAREER"
+
+
 def test_only_controlled_runtime_adapters_are_reported_available(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,

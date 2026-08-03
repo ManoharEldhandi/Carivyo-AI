@@ -231,22 +231,23 @@ def test_malformed_json_retries_only_once_then_persists_failure(
     assert len(runtime.calls) == 2
 
 
-def test_hallucinated_evidence_is_explicitly_unverified(
+def test_hallucinated_evidence_is_rejected_and_never_published(
     semantic_context: Dict[str, Any],
 ):
-    runtime = FakeRuntime([_response(resume_evidence="Invented resume sentence")])
+    runtime = FakeRuntime(
+        [
+            _response(resume_evidence="Invented resume sentence"),
+            _response(resume_evidence="Still invented resume evidence"),
+        ]
+    )
     service = ATSSemanticReviewService(semantic_context["database"], runtime)
 
     review = _review(service)
 
-    finding = review["response"]["findings"][0]
-    assert review["status"] == "complete"
-    assert finding["evidence_verification"] == {
-        "status": "unverified",
-        "resume_evidence": False,
-        "jd_evidence": True,
-    }
-    assert finding["ai_assisted"] is True
+    assert review["status"] == "failed"
+    assert review["error_code"] == "unverified_evidence"
+    assert review["response"] is None
+    assert review["attempt_count"] == 2
 
 
 def test_repeat_request_is_idempotent_for_the_same_input_and_model(

@@ -15,6 +15,7 @@ from app.connectors.base import (
     JobCandidate,
     OfficialConnector,
     clean_description,
+    html_to_text,
     infer_work_mode,
     parse_iso,
 )
@@ -504,6 +505,23 @@ class GoldmanSachsConnector(OfficialConnector):
           }
         }
     """
+    detail_query = """
+        query GetRoleById($externalSourceId: String!, $externalSourceFetch: Boolean) {
+          role(
+            externalSourceId: $externalSourceId
+            externalSourceFetch: $externalSourceFetch
+          ) {
+            roleId corporateTitle jobTitle jobFunction division descriptionHtml skillset
+            locations { primary state country city }
+            jobType { code description }
+            compensation { minSalary maxSalary currency }
+            applyActive status
+            externalSource {
+              externalApplicationUrl applyInExternalSource sourceId secondarySourceId
+            }
+          }
+        }
+    """
 
     async def fetch(self, client: httpx.AsyncClient) -> ConnectorFetchResult:
         page_size = max(1, min(500, int(self.config.get("page_size", 250))))
@@ -634,6 +652,96 @@ class GoldmanSachsConnector(OfficialConnector):
                 "items_fetched": len(items),
                 "absence_authoritative": complete,
             },
+        )
+
+    async def fetch_job(
+        self,
+        client: httpx.AsyncClient,
+        external_id: str,
+    ) -> Optional[JobCandidate]:
+        """Fetch the official detail record used for resume and ATS analysis.
+
+        Goldman role-search results intentionally contain only discovery metadata.
+        The public role detail query returns the responsibilities and qualifications
+        HTML plus the external application route. Revalidation therefore upgrades a
+        listing before a job-specific resume is allowed to start.
+        """
+
+        source_id = str(external_id).split("_", 1)[0].strip()
+        if not source_id:
+            return None
+        response = await client.post(
+            self.config["graphql_url"],
+            headers={
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "Origin": "https://higher.gs.com",
+                "User-Agent": "Carivyo/0.1 local job verifier",
+            },
+            json={
+                "operationName": "GetRoleById",
+                "variables": {
+                    "externalSourceId": source_id,
+                    "externalSourceFetch": True,
+                },
+                "query": self.detail_query,
+            },
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if payload.get("errors"):
+            raise ConnectorError(f"{self.name} detail query returned errors")
+        item = ((payload.get("data") or {}).get("role") or {})
+        if not isinstance(item, dict) or not item:
+            return None
+        status = str(item.get("status") or "").casefold()
+        if status in {"closed", "inactive", "filled"} or item.get("applyActive") is False:
+            return None
+        role_id = str(item.get("roleId") or external_id).strip()
+        locations = item.get("locations") or []
+        location_item = next(
+            (
+                value
+                for value in locations
+                if isinstance(value, dict) and value.get("primary")
+            ),
+            next((value for value in locations if isinstance(value, dict)), {}),
+        )
+        location = ", ".join(
+            dict.fromkeys(
+                str(location_item.get(key) or "").strip()
+                for key in ("city", "state", "country")
+                if str(location_item.get(key) or "").strip()
+            )
+        ) or "Unspecified"
+        description = html_to_text(str(item.get("descriptionHtml") or ""))
+        if not description:
+            description = clean_description(
+                f"Corporate title: {item.get('corporateTitle') or ''}",
+                f"Division: {item.get('division') or ''}",
+                f"Job function: {item.get('jobFunction') or ''}",
+                f"Skills: {item.get('skillset') or ''}",
+            )
+        external_source = item.get("externalSource") or {}
+        public_url = f"https://higher.gs.com/roles/{role_id}"
+        job_type = item.get("jobType") or {}
+        return JobCandidate(
+            connector_id=self.connector_id,
+            external_id=role_id,
+            title=item.get("jobTitle") or "Untitled role",
+            company=self.company,
+            description=description,
+            location=location,
+            work_mode=infer_work_mode(location),
+            employment_type=(
+                job_type.get("description") if isinstance(job_type, dict) else None
+            ),
+            posted_at=None,
+            posted_semantics=None,
+            apply_url=public_url,
+            source_url=public_url,
+            source_family=self.family,
+            raw=item,
         )
 
 

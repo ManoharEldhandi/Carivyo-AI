@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import {
   BriefcaseBusiness,
   Command,
@@ -38,12 +38,12 @@ export function runtimeDisplay(runtime: RuntimeState) {
     return {
       ready: false,
       providerName: "AI off",
-      modelName: "Deterministic features"
+      modelName: "Core mode"
     };
   }
   return {
     ready: true,
-    providerName: provider.name,
+    providerName: runtime.selection.fully_local ? "Local only" : provider.name,
     modelName: model.name
   };
 }
@@ -57,19 +57,26 @@ export function Shell({
 }: Props) {
   const processing = runtimeDisplay(runtime);
 
+  useEffect(() => {
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+  }, [page]);
+
   return (
     <div className="app-shell">
-      <aside className="sidebar" aria-label="Primary navigation">
-        <div className="sidebar__brand">
-          <span className="brand-mark" aria-hidden="true">C</span>
-          <div>
-            <strong>Carivyo</strong>
-            <span>Jobs and resumes</span>
-          </div>
-        </div>
+      <div className="product-orbit" aria-hidden="true" />
+      <header className="product-nav">
+        <button
+          className="product-nav__brand"
+          type="button"
+          onClick={() => onPageChange("jobs")}
+          aria-label="Carivyo home"
+        >
+          <span className="brand-mark" aria-hidden="true"><span /></span>
+          <span>CARIVYO</span>
+        </button>
 
-        <nav>
-          <span className="sidebar__section-label">Workspace</span>
+        <nav className="product-nav__links" aria-label="Primary navigation">
           {navigation.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
@@ -84,10 +91,7 @@ export function Shell({
           ))}
         </nav>
 
-      </aside>
-
-      <div className="workspace">
-        <header className="topbar">
+        <div className="product-nav__actions">
           <button className="command-bar" type="button" onClick={onOpenChat}>
             <Sparkles aria-hidden="true" />
             <span>Ask Carivyo</span>
@@ -103,26 +107,14 @@ export function Shell({
               <strong>{processing.modelName}</strong>
             </span>
           </div>
-        </header>
+        </div>
+      </header>
+
+      <div className="workspace">
         <main id="main-content" className="page-content">
           {children}
         </main>
       </div>
-
-      <nav className="mobile-nav" aria-label="Mobile navigation">
-        {navigation.map(({ id, label, icon: Icon }) => (
-          <button
-            key={id}
-            type="button"
-            className={page === id ? "is-active" : ""}
-            aria-current={page === id ? "page" : undefined}
-            onClick={() => onPageChange(id)}
-          >
-            <Icon aria-hidden="true" />
-            <span>{label}</span>
-          </button>
-        ))}
-      </nav>
     </div>
   );
 }

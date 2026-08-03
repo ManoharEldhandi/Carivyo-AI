@@ -32,6 +32,12 @@ from app.db import Database
 from app.services.ats import ATSAnalyzer, CRITICAL_CHECK_IDS
 from app.services.extraction import build_evidence, extract_in_subprocess
 from app.services.hiring_agent import LocalHiringAgent
+from app.services.pdf_validation import validate_pdf_parsers
+from app.services.requirements import (
+    analyze_job_description,
+    extract_requirements,
+    match_requirements,
+)
 from app.services.profile import ProfileService
 from app.services.search import SearchService
 from app.utils import (
@@ -64,6 +70,7 @@ class ResumeService:
         "export_ok",
         "page_count_ok",
         "text_extraction_ok",
+        "parser_consensus_ok",
         "links_ok",
         "identity_ok",
         "section_order_ok",
@@ -131,6 +138,12 @@ class ResumeService:
         if job["live_state"] != "live":
             raise ResumeRunBlocked(
                 "Resume design is blocked because the official job route is not currently live"
+            )
+        jd_quality = analyze_job_description(job["description"], job["title"])
+        if jd_quality["status"] != "complete":
+            raise ResumeRunBlocked(
+                "The official source has not supplied complete responsibilities and qualifications. "
+                "Carivyo will not claim job-specific ATS alignment from partial discovery metadata."
             )
         profile = self.profiles.active_profile()
         if not profile:
@@ -205,6 +218,7 @@ class ResumeService:
                 "description_path": str(jd_path),
                 "source_url": job["source_url"],
                 "snapshot_hash": stable_hash(job["description"]),
+                "quality": jd_quality,
             },
             "profile_version": profile["version"],
             "profile_snapshot": profile_snapshot,
@@ -982,7 +996,13 @@ class ResumeService:
             job["description"],
             selected_for_pdf,
         )
-        render_path = self._render_pdf(pdf_path, workspace / "renders", variant_number)
+        render_paths = self._render_pdf_pages(
+            pdf_path,
+            workspace / "renders",
+            variant_number,
+            len(reader.pages),
+        )
+        render_path = render_paths[0] if render_paths else None
         evidence_ok = all(
             self._normalize_claim(claim["text"]) in self._normalize_claim(extracted)
             for claim in selected_for_pdf
@@ -1032,7 +1052,28 @@ class ResumeService:
         section_completeness_ok = all(
             item["present"] for item in section_inventory if item["expected"]
         )
-        visual_ok, visual_details = self._validate_render(render_path)
+        parser_validation = validate_pdf_parsers(
+            pdf_path,
+            pypdf_text=extracted,
+            expected_sections=[
+                self.SECTION_LABELS[item].casefold()
+                for item in present_sections
+                if item in self.SECTION_LABELS
+            ],
+        )
+        parser_consensus_ok = parser_validation["status"] != "blocked"
+        page_visual_results = [self._validate_render(path) for path in render_paths]
+        visual_ok = bool(page_visual_results) and all(
+            result[0] for result in page_visual_results
+        ) and len(page_visual_results) == len(reader.pages)
+        visual_details = {
+            "method": "deterministic_raster_all_pages_v2",
+            "human_inspected": False,
+            "page_count": len(reader.pages),
+            "validated_page_count": len(page_visual_results),
+            "pages": [result[1] for result in page_visual_results],
+            "reason": "passed_all_page_machine_checks" if visual_ok else "page_visual_check_failed",
+        }
         validation = {
             "export_ok": pdf_path.exists() and pdf_path.stat().st_size > 500,
             "page_count": len(reader.pages),
@@ -1041,6 +1082,8 @@ class ResumeService:
             "effective_page_limit": max_pages,
             "section_preserving_page_limit_relaxed": page_limit_relaxed,
             "text_extraction_ok": len(extracted.strip()) > 80,
+            "parser_consensus_ok": parser_consensus_ok,
+            "parser_validation": parser_validation,
             "links_ok": links_ok,
             "identity_ok": identity_ok,
             "section_order_ok": section_order_ok,
@@ -1059,6 +1102,7 @@ class ResumeService:
                 "export_ok",
                 "page_count_ok",
                 "text_extraction_ok",
+                "parser_consensus_ok",
                 "links_ok",
                 "identity_ok",
                 "section_order_ok",
@@ -1083,6 +1127,7 @@ class ResumeService:
                 job,
                 profile,
                 export_filename,
+                parser_validation,
             ),
             job["description"],
         )
@@ -1162,7 +1207,7 @@ class ResumeService:
                 claims=selected_for_pdf,
                 requirements=requirement_map,
                 section_inventory=section_inventory,
-                deterministic_ats_score=ats_analysis["overall_score"],
+                deterministic_assessment=ats_analysis.get("assessment"),
             )
             if self.hiring_agent
             else {
@@ -1255,6 +1300,7 @@ class ResumeService:
             "base_mode": mode,
             "custom_instruction_interpretation": list(interpretation),
             "coverage": coverage,
+            "jd_quality": ats_analysis.get("jd_quality", {}),
             "changes": change_plan,
             "validation": validation,
             "ats_analysis": ats_analysis,
@@ -1304,6 +1350,7 @@ class ResumeService:
                 "pdf": str(pdf_path.resolve()),
                 "editable_source": str(source_path.resolve()),
                 "render": str(render_path.resolve()) if render_path else "",
+                "render_pages": [str(path.resolve()) for path in render_paths],
                 "validation_report": str(
                     (workspace / "reports" / "validation.json").resolve()
                 ),
@@ -1346,6 +1393,7 @@ class ResumeService:
         job: Dict[str, Any],
         profile: Dict[str, Any],
         export_filename: str,
+        parser_validation: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         profile_links = profile["profile"].get("identity", {}).get("links", [])
         linkedin_url = next(
@@ -1371,6 +1419,12 @@ class ResumeService:
             "linkedin_url": linkedin_url,
             "extracted_char_count": len(extracted),
             "source_char_count": source_char_count,
+            "parse_rate": (
+                parser_validation.get("consensus_score")
+                if isinstance(parser_validation, dict)
+                else None
+            ),
+            "parser_validation": parser_validation or {},
         }
 
     @staticmethod
@@ -1659,6 +1713,9 @@ class ResumeService:
                 profile,
                 result.get("export_filename")
                 or self._professional_export_filename(profile, job),
+                validation.get("parser_validation")
+                if isinstance(validation.get("parser_validation"), dict)
+                else None,
             ),
             job["description"],
         )
@@ -2168,27 +2225,41 @@ class ResumeService:
     def _requirement_evidence_map(
         description: str, evidence: Sequence[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
-        requirements = ResumeService._atomic_requirements(description)
-        result = []
-        for requirement in requirements:
-            requirement_tokens = set(tokenize(requirement))
+        requirements = extract_requirements(description)
+        sections: Dict[str, List[str]] = {}
+        for claim in evidence:
+            sections.setdefault(str(claim.get("category") or "experience"), []).append(
+                str(claim.get("text") or "")
+            )
+        structured = match_requirements(requirements, sections)
+        result: List[Dict[str, Any]] = []
+        for requirement in structured["requirements"]:
+            requirement_text = str(requirement["text"])
+            requirement_tokens = set(tokenize(requirement_text))
+            matched_entities = set(requirement.get("matched_entities") or [])
             matches = []
             for claim in evidence:
-                overlap = requirement_tokens & set(tokenize(claim["text"]))
-                if overlap:
-                    matches.append((len(overlap), claim))
+                claim_text = str(claim.get("text") or "")
+                overlap = requirement_tokens & set(tokenize(claim_text))
+                entity_overlap = {
+                    entity
+                    for entity in matched_entities
+                    if entity.casefold() in claim_text.casefold()
+                }
+                if overlap or entity_overlap:
+                    matches.append((len(overlap) + 2 * len(entity_overlap), claim, overlap))
             matches.sort(key=lambda item: item[0], reverse=True)
             years_required = bool(
                 re.search(
                     r"\b(?:\d+\s*[-–]\s*\d+|\d+\+?)\s+years?\b|years?\s+of\s+experience",
-                    requirement,
+                    requirement_text,
                     flags=re.IGNORECASE,
                 )
             )
             years_proven = any(
                 re.search(
                     r"\b(?:\d+\s*[-–]\s*\d+|\d+\+?)\s+years?\b|years?\s+of\s+experience",
-                    item[1]["text"],
+                    str(item[1].get("text") or ""),
                     flags=re.IGNORECASE,
                 )
                 for item in matches
@@ -2196,22 +2267,27 @@ class ResumeService:
             if years_required and not years_proven:
                 classification = "unsupported"
                 matches = []
-            elif matches and matches[0][0] >= 2:
-                classification = "direct"
-            elif matches:
-                classification = "transferable"
             else:
-                classification = "unsupported"
+                classification = {
+                    "direct": "direct",
+                    "listed_only": "transferable",
+                    "transferable": "transferable",
+                    "unsupported": "unsupported",
+                }[str(requirement["match_status"])]
             result.append(
                 {
-                    "requirement": requirement,
+                    "requirement_id": requirement["id"],
+                    "requirement": requirement_text,
+                    "priority": requirement["priority"],
+                    "category": requirement["category"],
                     "classification": classification,
                     "evidence_ids": [item[1]["id"] for item in matches[:4]],
-                    "overlap_terms": sorted(
-                        requirement_tokens & set(tokenize(matches[0][1]["text"]))
-                    )
-                    if matches
-                    else [],
+                    "overlap_terms": sorted(matches[0][2]) if matches else [],
+                    "best_field": requirement.get("best_field"),
+                    "matched_entities": requirement.get("matched_entities") or [],
+                    "demonstrated_entities": requirement.get("demonstrated_entities") or [],
+                    "entity_coverage": requirement.get("entity_coverage"),
+                    "lexical_coverage": requirement.get("lexical_coverage"),
                 }
             )
         return result
@@ -2876,32 +2952,57 @@ class ResumeService:
     def _render_pdf(
         pdf_path: Path, render_directory: Path, variant_number: int
     ) -> Optional[Path]:
+        pages = ResumeService._render_pdf_pages(
+            pdf_path,
+            render_directory,
+            variant_number,
+            len(PdfReader(str(pdf_path)).pages),
+        )
+        return pages[0] if pages else None
+
+    @staticmethod
+    def _render_pdf_pages(
+        pdf_path: Path,
+        render_directory: Path,
+        variant_number: int,
+        page_count: int,
+    ) -> List[Path]:
         executable = shutil.which("pdftoppm")
         if not executable:
-            return None
-        prefix = render_directory / f"resume{variant_number}"
-        result = subprocess.run(
-            [
-                executable,
-                "-png",
-                "-f",
-                "1",
-                "-singlefile",
-                "-r",
-                "144",
-                str(pdf_path),
-                str(prefix),
-            ],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            check=False,
-        )
-        output = prefix.with_suffix(".png")
-        if result.returncode != 0 or not output.exists():
-            return None
-        output.chmod(0o600)
-        return output
+            return []
+        outputs: List[Path] = []
+        for page_number in range(1, max(1, page_count) + 1):
+            stem = (
+                f"resume{variant_number}"
+                if page_number == 1
+                else f"resume{variant_number}-page{page_number}"
+            )
+            prefix = render_directory / stem
+            result = subprocess.run(
+                [
+                    executable,
+                    "-png",
+                    "-f",
+                    str(page_number),
+                    "-l",
+                    str(page_number),
+                    "-singlefile",
+                    "-r",
+                    "144",
+                    str(pdf_path),
+                    str(prefix),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+            output = prefix.with_suffix(".png")
+            if result.returncode != 0 or not output.exists():
+                return []
+            output.chmod(0o600)
+            outputs.append(output)
+        return outputs
 
     @staticmethod
     def _validate_render(render_path: Optional[Path]) -> Tuple[bool, Dict[str, Any]]:

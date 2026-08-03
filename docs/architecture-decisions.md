@@ -159,9 +159,10 @@ official source.
 **Status:** Accepted
 
 Carivyo runs a deterministic, versioned 27-check analyzer against the exact
-final PDF text and frozen job description. Its score is a diagnostic summary,
-not a universal ATS score or a reproduction of a third party's proprietary
-formula. Every check exposes its weight, evidence, status, and suggested fix.
+final PDF text and frozen job description. It separately reports submission
+compatibility, evidence alignment, and content quality; it does not present a
+universal ATS score or reproduce a third party's proprietary formula. Every
+check exposes its weight, evidence, status, and suggested fix.
 
 The seven public categories are ATS essentials, resume sections, content, job
 tailoring, recruiter red flags, bias/date safety, and seniority/impact. Missing
@@ -243,9 +244,9 @@ completeness wins and the relaxation is reported explicitly.
 The MIT-licensed `interviewstreet/hiring-agent` informed an automatic local
 hiring-manager review. Carivyo replaces the upstream internship/GitHub-heavy
 rubric with five job-specific dimensions and supplies only approved claim IDs,
-requirements, section inventory, and the deterministic ATS score. The report
+requirements, section inventory, and dimension-specific deterministic evidence. The report
 runs only through an on-device Ollama model, is advisory, cannot change
 approval, and degrades to an explicit unavailable/failed state without blocking
-deterministic generation. The displayed composite is 75% deterministic evidence
-coverage and 25% local-model judgment; both component scores and the basis are
-returned so a small model cannot silently override verified evidence.
+deterministic generation. Each displayed dimension is independently grounded;
+verified excerpts and deterministic baselines are returned so a small model
+cannot silently override verified evidence.

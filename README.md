@@ -13,7 +13,9 @@ local Ollama model is installed, new profiles default to it for chat and
 Carivyo's advisory hiring-manager review. Ollama cloud pointers are excluded
 from every path labelled local. With Codex, compact task context is processed by the selected provider through
 the installed CLI while Carivyo's records stay local. With Ollama, both stored
-records and model inference remain on the device. Turning AI off keeps the
+records and model inference remain on the device. The explicit Fully local
+switch blocks provider-backed execution and refuses to fall back when Ollama
+is unavailable. Turning AI off keeps the
 deterministic extraction, filtering, matching, and ATS paths available.
 
 ## What works
@@ -39,17 +41,20 @@ deterministic extraction, filtering, matching, and ATS paths available.
   the user opts in.
 - A general, isolated resume-design skill with frozen inputs, evidence mapping,
   unsupported-gap reporting, artifact checks, and an approval gate. The exact
-  final PDF is evaluated by a transparent first-party 27-check ATS diagnostic;
+  final PDF is evaluated by ATS v2 as three independent outputs—submission
+  compatibility, evidence-backed job alignment, and content quality. A full
+  official JD is required before job-specific alignment is shown;
   approval is blocked if the analyzed artifacts change. Resume Studio restores
   the latest saved job-specific run after closing or refreshing, while “New
   version” starts a separate immutable run.
-- Poppler-based PDF extraction preserves whitespace and merges wrapped bullets.
+- Independent `pypdf` and Poppler extraction must agree, and every rendered PDF
+  page passes machine visual validation before approval.
   Every recognized source section is retained as a blocking generation gate;
   page fitting can remove redundant details but cannot erase an entire section.
   A job-specific, explainable hiring-manager simulation adapted from the
   MIT-licensed `interviewstreet/hiring-agent` runs through on-device Ollama when
-  available and remains advisory. Its displayed composite is anchored 75% to
-  deterministic evidence coverage and 25% to the local-model judgment.
+  available and remains advisory. Each hiring dimension uses its own evidence
+  baseline before the local model contributes advisory judgment.
 - User-controlled application handoff and pipeline tracking. Carivyo does not
   submit applications automatically.
 - Downloadable local backup/JSON export and deletion controls, strict artifact
@@ -61,7 +66,7 @@ Requirements:
 
 - Python 3.11+ (3.13 recommended)
 - Node.js 20+
-- Poppler (`pdftoppm`) for PDF render validation
+- Poppler (`pdftoppm` and `pdftotext`) for render and parser-consensus validation
 - Optional: authenticated Codex CLI or a running Ollama model
 - Optional: Tectonic for in-browser TeX compilation (`brew install tectonic`)
 
@@ -129,8 +134,9 @@ Set `CARIVYO_ENHANCV_EMAIL`, `CARIVYO_ENHANCV_PASSWORD`, and
 Keychain item can be used instead with `CARIVYO_ENHANCV_USE_KEYCHAIN=true`.
 The UI asks for explicit consent before
 sending the exact PDF and JD. Browser HTML, screenshots, logs, and generic
-intermediate reports are deleted after the run; only one compact final report
-and the reusable local browser login profile are retained. Credentials are
+intermediate reports are deleted after the run; immutable, versioned compact
+reports and the reusable local browser login profile are retained. Each report
+is bound to the actual PDF/JD bytes and kept in history. Credentials are
 never committed or returned through the API.
 
 ## Validation

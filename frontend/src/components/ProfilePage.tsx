@@ -134,7 +134,8 @@ export function ProfilePage({
   const runtimeCanSave = Boolean(
     selectedDraftProvider?.available &&
       selectedDraftModel &&
-      supportedReasoning.includes(runtimeDraft.reasoning_effort)
+      supportedReasoning.includes(runtimeDraft.reasoning_effort) &&
+      (!runtimeDraft.fully_local || selectedDraftProvider.id === "ollama")
   );
 
   async function refreshProfile() {
@@ -369,12 +370,25 @@ export function ProfilePage({
     }));
   }
 
+  function setFullyLocal(enabled: boolean) {
+    const ollama = runtime.providers.find((item) => item.id === "ollama" && item.available);
+    const localModel = ollama?.models?.find((item) => item.recommended) ?? ollama?.models?.[0];
+    setRuntimeDraft((current) => ({
+      ...current,
+      fully_local: enabled,
+      provider: enabled ? ollama?.id ?? "ollama" : current.provider,
+      model: enabled ? localModel?.id ?? "" : current.model,
+      reasoning_effort: enabled ? "none" : current.reasoning_effort
+    }));
+  }
+
   return (
     <>
       <section className="page-heading profile-heading">
         <div>
+          <p className="eyebrow">Career operating system</p>
           <h1>Profile</h1>
-          <p>Manage your search, resume, and AI settings.</p>
+          <p>One private source of truth for your search, résumé, and AI runtime.</p>
         </div>
       </section>
 
@@ -937,6 +951,18 @@ export function ProfilePage({
             </article>
           </div>
 
+          <label className="local-mode-control">
+            <input
+              type="checkbox"
+              checked={Boolean(runtimeDraft.fully_local)}
+              onChange={(event) => setFullyLocal(event.target.checked)}
+            />
+            <span>
+              <strong>Fully local execution</strong>
+              <small>Require Ollama for every model call. Provider-backed models are blocked while this is enabled.</small>
+            </span>
+          </label>
+
           <div className="runtime-form">
             <label className="form-field">
               <span>AI provider</span>
@@ -946,7 +972,11 @@ export function ProfilePage({
                   <option
                     key={provider.id}
                     value={provider.id}
-                    disabled={!provider.available || !provider.models?.length}
+                    disabled={
+                      !provider.available ||
+                      !provider.models?.length ||
+                      (Boolean(runtimeDraft.fully_local) && provider.id !== "ollama")
+                    }
                   >
                     {provider.name}{provider.available ? "" : " — unavailable"}
                   </option>
@@ -1514,6 +1544,7 @@ function normalizeRuntimeSelection(
   const model = provider?.models?.find((item) => item.id === selection.model);
   return {
     ...selection,
+    fully_local: Boolean(selection.fully_local),
     reasoning_effort: compatibleReasoningEffort(selection.reasoning_effort, model)
   };
 }

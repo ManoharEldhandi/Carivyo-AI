@@ -11,14 +11,14 @@ Every gate below must pass before `needs_user_review`:
 | Export | Editable source and non-empty PDF exist |
 | TeX safety | An editable source compiled the current PDF in untrusted mode and contains no blocked file/shell primitives; fallback runs are labeled non-editable |
 | Page limit | Generated page count matches the interpreted length directive |
-| Text extraction | PDF text is readable and ordered |
+| Text extraction | Independent pypdf and Poppler extraction agree on fields, tokens, and readable order |
 | Identity | Approved name and available contact fields are unchanged |
 | Evidence | Every generated factual claim maps to approved evidence |
 | Links | Visible approved links are valid and present in the PDF |
 | Sections | Every recognized source section appears in the intended order; page fitting cannot delete a section |
-| Visual | A deterministic raster gate confirms readable page geometry, visible content, safe edge clearance, and plausible density; the product still labels human inspection separately |
+| Visual | Every PDF page has a deterministic raster gate for geometry, visible content, safe edge clearance, and plausible density; the product still labels human inspection separately |
 | Change budget | Tailor mode is at or below 25%; above 15% is visibly flagged |
-| First-party ATS analysis | Exactly 27 versioned checks analyze the final extracted PDF against the frozen JD |
+| First-party ATS analysis | Exactly 27 versioned checks feed separate compatibility, evidence-alignment, and content-quality outputs against a complete frozen JD |
 | Artifact binding | JD, PDF, extracted text, analyzer report, and ruleset hashes match |
 | Approval | Generation ends at `needs_user_review` |
 

@@ -29,6 +29,31 @@ def _create_pending_run(client) -> Dict[str, Any]:
     return run
 
 
+def test_job_specific_resume_blocks_partial_discovery_metadata(client, monkeypatch):
+    complete_onboarding(client, RESUME)
+    job = client.get("/api/jobs").json()["jobs"][0]
+
+    async def partial_revalidation(_job_id: str) -> Dict[str, Any]:
+        return {
+            **job,
+            "description": "Backend Engineer. Python experience preferred.",
+            "live_state": "live",
+        }
+
+    monkeypatch.setattr(
+        client.app.state.container.search,
+        "revalidate",
+        partial_revalidation,
+    )
+    response = client.post(
+        f"/api/jobs/{job['id']}/resume-runs",
+        json={"custom_instructions": "Emphasize backend evidence."},
+    )
+
+    assert response.status_code == 409
+    assert "complete responsibilities and qualifications" in response.json()["detail"]
+
+
 @pytest.fixture()
 def pending_run(client) -> Dict[str, Any]:
     return _create_pending_run(client)
@@ -167,11 +192,14 @@ def test_parse_rate_uses_extraction_counts_and_forgery_cannot_pass(
     assert generation_metadata["source_char_count"] != len(extracted)
     assert "extracted_characters" not in generation_metadata
     assert "source_characters" not in generation_metadata
-    expected_rate = round(
-        min(100.0, len(extracted) / generation_metadata["source_char_count"] * 100.0),
-        1,
-    )
+    parser_validation = run["result"]["validation"]["parser_validation"]
+    expected_rate = parser_validation["consensus_score"]
     assert run["result"]["ats_analysis"]["parse_rate"] == expected_rate
+    assert parser_validation["status"] == "strong"
+    assert set(parser_validation["parsers"]) == {
+        "pypdf",
+        "poppler_layout",
+    }
 
     original_rate = run["result"]["ats_analysis"]["parse_rate"]
 

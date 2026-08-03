@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     fixture_jobs_path: Optional[Path] = None
     codex_model: str = "gpt-5.6-terra"
     ollama_model: Optional[str] = None
+    fully_local_mode: bool = False
     local_hiring_agent_enabled: bool = True
     enhancv_email: Optional[str] = None
     enhancv_password: Optional[SecretStr] = None

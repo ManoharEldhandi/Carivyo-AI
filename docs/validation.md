@@ -58,8 +58,8 @@ clean temporary data directory and realistic fixtures. The journey completed:
    provenance.
 7. Explicitly opened Resume Studio and supplied custom evidence-constrained
    instructions.
-8. Generated the resume, reviewed an ATS readiness score of 80 against a
-   same-JD imported-baseline score of 77, and saw all unsupported requirements.
+8. Generated the resume, reviewed separate submission compatibility, evidence
+   alignment, and content-quality results, and saw all unsupported requirements.
 9. Edited the generated TeX in Resume Studio, changed only the A4 page margin,
    recompiled it in Tectonic untrusted mode, and confirmed that draft 2 replaced
    all superseded generated variant files while retaining the immutable base.
@@ -153,18 +153,19 @@ are not product guarantees.
 .venv/bin/python scripts/benchmark_ats.py
 ```
 
-Synthetic benchmark v1 contains two labeled fixtures. Results:
+Anonymized PDF benchmark v2 contains 100 reproducible resume/JD pairs. Results:
 
-- Analyzer: `carivyo-ats-1.1.0`.
+- Analyzer: `carivyo-ats-2.0.0`.
 - Repeatability: 1.0.
 - Labeled issue precision: 1.0.
-- Labeled issue recall: 1.0.
-- Strong fixture score: 98.6.
-- Weak fixture score: 40.8.
+- Labeled issue recall: 0.9857.
+- Actual PDF artifacts: 100 across 10 role families.
+- False positives: 0; false negatives: 2, both published in
+  `docs/ats-benchmark-v2.md`.
 - Vendor agreement: `null`.
 
-The perfect synthetic metrics cover only 15 labeled check outcomes and do not
-establish general accuracy. No premium-provider score or private report is
+The corpus covers 800 labeled check outcomes and does not establish applicant-
+population accuracy. No premium-provider score or private report is
 committed, and no 98% parity claim is made. The required authorized anonymized
 corpus and agreement metric are defined in `docs/ats-methodology.md`.
 

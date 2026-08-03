@@ -36,6 +36,7 @@ class RuntimeSettingsRequest(BaseModel):
     provider: str = Field(min_length=1, max_length=50)
     model: str = Field(min_length=1, max_length=160)
     reasoning_effort: Literal["none", "low", "medium", "high"] = "low"
+    fully_local: bool = False
 
 
 class OnboardingQuestion(BaseModel):

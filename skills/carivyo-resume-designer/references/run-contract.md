@@ -150,9 +150,16 @@ Write `result.json` with:
   },
   "ats_analysis": {
     "analyzer_version": "semver",
-    "overall_score": 0,
+    "assessment": {
+      "status": "strong|review|needs_focus|blocked|insufficient_data",
+      "compatibility": {},
+      "evidence_alignment": {},
+      "content_quality": {},
+      "legacy_score_deprecated": true
+    },
+    "jd_quality": {"status": "complete", "confidence": "high|medium"},
+    "structured_alignment": {"requirements": []},
     "parse_rate": 0,
-    "categories": [],
     "checks": [],
     "critical_failures": [],
     "disclaimer": "string"
@@ -161,10 +168,7 @@ Write `result.json` with:
     "status": "complete|unavailable|failed|disabled",
     "provider": "ollama",
     "advisory": true,
-    "score": 0,
-    "raw_model_score": 0,
-    "deterministic_ats_score": 0,
-    "score_basis": "75% deterministic evidence coverage and 25% local hiring-manager judgment",
+    "score_basis": "independent dimension-specific evidence baselines plus local judgment",
     "authoritative": false,
     "dimensions": []
   },
@@ -178,6 +182,7 @@ Write `result.json` with:
     "pdf": "absolute-path",
     "editable_source": "absolute-path",
     "render": "absolute-path",
+    "render_pages": ["absolute-path-for-every-page"],
     "validation_report": "absolute-path",
     "ats_report": "absolute-path"
   }

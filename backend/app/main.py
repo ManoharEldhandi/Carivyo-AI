@@ -223,6 +223,13 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         openapi_url="/api/openapi.json",
     )
     application.state.container = container
+
+    @application.on_event("startup")
+    async def resume_interrupted_external_reports() -> None:
+        # Running rows are durable queue entries. A process restart resumes
+        # them from the immutable PDF/JD byte hashes recorded at consent time.
+        for report_id in container.enhancv.pending():
+            asyncio.create_task(asyncio.to_thread(container.enhancv.execute, report_id))
     application.add_middleware(
         CORSMiddleware,
         allow_origins=settings.allowed_origins,
@@ -320,10 +327,21 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     @application.get("/api/runtime/providers", dependencies=[Depends(require_session)])
     async def runtime_providers() -> Dict[str, Any]:
         providers = await asyncio.to_thread(container.runtime.discover)
+        selection = container.runtime.selection()
+        local_provider = next((item for item in providers if item.id == "ollama"), None)
         return {
             "providers": [provider.model_dump() for provider in providers],
             "mode": "ai_available" if any(item.available for item in providers) else "degraded",
-            "selection": container.runtime.selection(),
+            "selection": selection,
+            "execution": {
+                "fully_local": bool(selection.get("fully_local")),
+                "ready": bool(local_provider and local_provider.available),
+                "boundary": (
+                    "All model prompts stay on this device through Ollama."
+                    if selection.get("fully_local")
+                    else "The selected provider may process model prompts outside this device."
+                ),
+            },
         }
 
     @application.patch(
@@ -336,6 +354,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 payload.provider,
                 payload.model,
                 payload.reasoning_effort,
+                payload.fully_local,
             )
         except (RuntimeError, ValueError) as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -343,6 +362,10 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         return {
             "selection": selection,
             "providers": [item.model_dump() for item in providers],
+            "execution": {
+                "fully_local": bool(selection.get("fully_local")),
+                "ready": any(item.id == "ollama" and item.available for item in providers),
+            },
         }
 
     @application.post("/api/onboarding/import", dependencies=[Depends(require_session)])
@@ -658,6 +681,15 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     async def enhancv_report(run_id: str) -> Dict[str, Any]:
         container.resumes.get(run_id)
         return {"report": container.enhancv.latest(run_id)}
+
+    @application.get(
+        "/api/resume-runs/{run_id}/ats-reports/enhancv/history",
+        dependencies=[Depends(require_session)],
+    )
+    async def enhancv_report_history(run_id: str) -> Dict[str, Any]:
+        container.resumes.get(run_id)
+        reports = container.enhancv.history(run_id)
+        return {"reports": reports, "count": len(reports)}
 
     @application.post(
         "/api/resume-runs/{run_id}/ats-semantic-review",

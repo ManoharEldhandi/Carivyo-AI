@@ -112,18 +112,18 @@ machine check; do not imply that a human reviewed overlap, typography, or visual
 quality until the user actually inspects the preview.
 
 Run Carivyo's first-party ATS analyzer against the exact extracted PDF and the
-frozen JD. It applies 27 deterministic checks across seven categories and
-returns transparent weights, evidence, and fixes. It requires no subscription
-and must not claim to reproduce any third-party proprietary score. Treat the
-score as diagnostic: there is no universal ATS score.
+complete frozen JD. It applies 27 deterministic checks and reports submission
+compatibility, evidence-backed job alignment, and content quality separately.
+The migration-only legacy aggregate is deprecated and must not be presented as
+a universal score.
 
 When an on-device Ollama model is available, run the bounded local hiring-manager
-simulation against approved claim IDs, the requirement map, section inventory,
-and deterministic score. Treat its output as advisory decision support only. It
+simulation against approved claim IDs, the requirement map, and section
+inventory. Treat its output as advisory decision support only. It
 must not approve or reject the candidate, alter claims, infer protected traits,
 use an Ollama cloud pointer, or block deterministic generation when unavailable.
-Expose the displayed score as 75% deterministic evidence coverage and 25% raw
-local-model judgment, with both component scores visible in the result.
+Build every displayed dimension from its own evidence baseline; never seed all
+dimensions from the same ATS aggregate. Local-model judgment remains advisory.
 
 When the user explicitly selects Enhancv and confirms external processing, the
 orchestrator may send only the exact current PDF and frozen JD through the

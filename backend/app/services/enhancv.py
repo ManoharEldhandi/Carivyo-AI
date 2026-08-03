@@ -7,18 +7,34 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Literal, Optional
 
-from pydantic import SecretStr
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError
 
 from app.artifacts import ArtifactVault
 from app.config import Settings
 from app.db import Database
-from app.utils import json_dumps, json_loads, new_id
+from app.utils import json_dumps, json_loads, new_id, stable_hash
 
 
 class EnhancvUnavailable(RuntimeError):
     pass
+
+
+class EnhancvRawReport(BaseModel):
+    """Strict boundary for the authorized browser adapter output."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    ok: bool
+    mode: Literal["jd-tailored", "generic"]
+    score: float | int | None = Field(default=None, ge=0, le=100)
+    tailoredScore: float | int | None = Field(default=None, ge=0, le=100)
+    genericScore: float | int | None = Field(default=None, ge=0, le=100)
+    sections: Dict[str, Any] = Field(default_factory=dict)
+    tailoring: Dict[str, Any] = Field(default_factory=dict)
+    blocker: str | None = None
+    captchaDetected: bool = False
 
 
 class EnhancvATSService:
@@ -31,6 +47,7 @@ class EnhancvATSService:
     """
 
     ENGINE = "enhancv"
+    ADAPTER_VERSION = "carivyo-enhancv-2.0.0"
 
     def __init__(self, settings: Settings, database: Database, vault: ArtifactVault):
         self.settings = settings
@@ -73,28 +90,48 @@ class EnhancvATSService:
         if run["status"] not in {"needs_user_review", "ready_to_apply"}:
             raise EnhancvUnavailable("Finish generating the resume before running Enhancv")
         result = json_loads(run.get("result_json"), {})
-        variant, pdf_hash, jd_hash = self._binding(result)
+        variant, bound_pdf_hash, _snapshot_hash = self._binding(result)
         workspace = Path(run["workspace_path"]).resolve()
-        stale_final = workspace / "reports" / "enhancv-final.json"
-        try:
-            stale_final.relative_to(workspace)
-            stale_final.unlink(missing_ok=True)
-        except ValueError as exc:
-            raise EnhancvUnavailable("The resume workspace is invalid") from exc
+        artifacts = result.get("artifacts", {})
+        pdf = self._confined_file(workspace, artifacts.get("pdf"), "resume PDF")
+        jd = self._confined_file(
+            workspace,
+            workspace / "inputs" / "job-description.txt",
+            "job description",
+        )
+        pdf_hash = self.vault.hash_file(pdf)
+        jd_hash = self.vault.hash_file(jd)
+        if pdf_hash != bound_pdf_hash:
+            raise EnhancvUnavailable("The generated PDF no longer matches its approved binding")
+        running = self.database.fetch_one(
+            """
+            SELECT * FROM external_ats_reports
+            WHERE run_id = ? AND engine = ? AND variant = ? AND status = 'running'
+            ORDER BY created_at DESC, rowid DESC LIMIT 1
+            """,
+            (run_id, self.ENGINE, variant),
+        )
+        if running:
+            return self._public(running)
         report_id = new_id()
         with self.database.transaction() as connection:
-            connection.execute(
-                "DELETE FROM external_ats_reports WHERE run_id = ? AND engine = ?",
-                (run_id, self.ENGINE),
-            )
             connection.execute(
                 """
                 INSERT INTO external_ats_reports(
                     id, run_id, variant, resume_pdf_hash,
-                    job_description_hash, engine, status
-                ) VALUES (?, ?, ?, ?, ?, ?, 'running')
+                    job_description_hash, engine, status, adapter_version,
+                    started_at
+                ) VALUES (?, ?, ?, ?, ?, ?, 'running', ?, CURRENT_TIMESTAMP)
                 """,
-                (report_id, run_id, variant, pdf_hash, jd_hash, self.ENGINE),
+                (
+                    report_id,
+                    run_id,
+                    variant,
+                    pdf_hash,
+                    jd_hash,
+                    self.ENGINE,
+                    self.ADAPTER_VERSION,
+                ),
             )
         return self.get(report_id)
 
@@ -107,12 +144,8 @@ class EnhancvATSService:
         try:
             run = self._run(row["run_id"])
             result = json_loads(run.get("result_json"), {})
-            variant, pdf_hash, jd_hash = self._binding(result)
-            if (
-                variant != row["variant"]
-                or pdf_hash != row["resume_pdf_hash"]
-                or jd_hash != row["job_description_hash"]
-            ):
+            variant, bound_pdf_hash, _snapshot_hash = self._binding(result)
+            if variant != row["variant"]:
                 raise EnhancvUnavailable(
                     "The resume or job description changed after consent; confirm the current version"
                 )
@@ -124,6 +157,16 @@ class EnhancvATSService:
                 workspace / "inputs" / "job-description.txt",
                 "job description",
             )
+            actual_pdf_hash = self.vault.hash_file(pdf)
+            actual_jd_hash = self.vault.hash_file(jd)
+            if (
+                actual_pdf_hash != row["resume_pdf_hash"]
+                or actual_jd_hash != row["job_description_hash"]
+                or actual_pdf_hash != bound_pdf_hash
+            ):
+                raise EnhancvUnavailable(
+                    "The resume or job description changed after consent; confirm the current version"
+                )
             script = self._script_path()
             if not script:
                 raise EnhancvUnavailable("checker script is not configured")
@@ -186,20 +229,27 @@ class EnhancvATSService:
                     text_out,
                     completed.returncode,
                     self._redact_external_output(completed.stderr),
-                    result,
+                    actual_pdf_hash,
+                    actual_jd_hash,
                 )
 
-            final_path = workspace / "reports" / "enhancv-final.json"
+            final_path = (
+                workspace
+                / "reports"
+                / f"enhancv-{variant}-{report_id}.json"
+            )
             final_path.write_text(
                 json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
             )
             final_path.chmod(0o600)
             status = "complete" if payload["ok"] else "failed"
+            report_hash = stable_hash(payload)
             self.database.execute(
                 """
                 UPDATE external_ats_reports
                 SET status = ?, score = ?, report_json = ?, artifact_path = ?,
-                    error = ?, updated_at = CURRENT_TIMESTAMP
+                    error = ?, report_hash = ?, attempt_count = attempt_count + 1,
+                    updated_at = CURRENT_TIMESTAMP, completed_at = CURRENT_TIMESTAMP
                 WHERE id = ?
                 """,
                 (
@@ -208,6 +258,7 @@ class EnhancvATSService:
                     json_dumps(payload),
                     str(final_path),
                     payload.get("error"),
+                    report_hash,
                     report_id,
                 ),
             )
@@ -226,6 +277,26 @@ class EnhancvATSService:
             (run_id, self.ENGINE),
         )
         return self._public(row) if row else None
+
+    def history(self, run_id: str) -> list[Dict[str, Any]]:
+        rows = self.database.fetch_all(
+            """
+            SELECT * FROM external_ats_reports
+            WHERE run_id = ? AND engine = ?
+            ORDER BY created_at DESC, rowid DESC
+            """,
+            (run_id, self.ENGINE),
+        )
+        return [self._public(row) for row in rows]
+
+    def pending(self) -> list[str]:
+        return [
+            str(row["id"])
+            for row in self.database.fetch_all(
+                "SELECT id FROM external_ats_reports WHERE engine = ? AND status = 'running'",
+                (self.ENGINE,),
+            )
+        ]
 
     def get(self, report_id: str) -> Dict[str, Any]:
         row = self.database.fetch_one(
@@ -339,7 +410,8 @@ class EnhancvATSService:
         text_path: Path,
         return_code: int,
         stderr: str,
-        result: Dict[str, Any],
+        resume_pdf_hash: str,
+        job_description_hash: str,
     ) -> Dict[str, Any]:
         raw = {}
         if json_path.is_file():
@@ -352,31 +424,39 @@ class EnhancvATSService:
             if text_path.is_file()
             else ""
         )
-        ok = bool(raw.get("ok")) and return_code == 0
-        score = raw.get("tailoredScore") if raw.get("mode") == "jd-tailored" else raw.get("score")
-        blocker = self._redact_external_output(str(raw.get("blocker") or "")) or None
+        schema_error = ""
+        try:
+            parsed = EnhancvRawReport.model_validate(raw)
+            normalized = parsed.model_dump()
+        except ValidationError:
+            normalized = {}
+            schema_error = "Enhancv returned a report that failed the versioned schema"
+        ok = bool(normalized.get("ok")) and return_code == 0
+        score = normalized.get("tailoredScore") if normalized.get("mode") == "jd-tailored" else normalized.get("score")
+        blocker = self._redact_external_output(str(normalized.get("blocker") or "")) or None
         error = None if ok else self._safe_error(
-            str(blocker or stderr or f"checker exited with {return_code}")
+            str(schema_error or blocker or stderr or f"checker exited with {return_code}")
         )
         return {
+            "report_version": self.ADAPTER_VERSION,
             "engine": self.ENGINE,
             "provider": "Enhancv",
             "external": True,
             "ok": ok,
-            "mode": raw.get("mode") or "jd-tailored",
+            "mode": normalized.get("mode") or "jd-tailored",
             "score": score if isinstance(score, (int, float)) else None,
-            "sections": self._redact_external_value(raw.get("sections"))
-            if isinstance(raw.get("sections"), dict)
+            "sections": self._redact_external_value(normalized.get("sections"))
+            if isinstance(normalized.get("sections"), dict)
             else {},
-            "tailoring": self._redact_external_value(raw.get("tailoring"))
-            if isinstance(raw.get("tailoring"), dict)
+            "tailoring": self._redact_external_value(normalized.get("tailoring"))
+            if isinstance(normalized.get("tailoring"), dict)
             else {},
-            "generic_score": raw.get("genericScore"),
+            "generic_score": normalized.get("genericScore"),
             "blocker": blocker,
-            "captcha_detected": bool(raw.get("captchaDetected")),
+            "captcha_detected": bool(normalized.get("captchaDetected")),
             "report_text": report_text,
-            "resume_pdf_hash": result.get("provenance", {}).get("pdf_hash"),
-            "job_description_hash": result.get("provenance", {}).get("job_snapshot_hash"),
+            "resume_pdf_hash": resume_pdf_hash,
+            "job_description_hash": job_description_hash,
             "error": error,
             "disclaimer": (
                 "External diagnostic supplied by Enhancv. Carivyo does not alter, "
@@ -394,7 +474,8 @@ class EnhancvATSService:
         self.database.execute(
             """
             UPDATE external_ats_reports
-            SET status = 'failed', error = ?, updated_at = CURRENT_TIMESTAMP
+            SET status = 'failed', error = ?, attempt_count = attempt_count + 1,
+                updated_at = CURRENT_TIMESTAMP, completed_at = CURRENT_TIMESTAMP
             WHERE id = ?
             """,
             (safe_error, report_id),
@@ -412,7 +493,13 @@ class EnhancvATSService:
             "status": row["status"],
             "score": row.get("score"),
             "report": json_loads(row.get("report_json"), {}),
+            "artifact_path": row.get("artifact_path"),
             "error": row.get("error"),
+            "adapter_version": row.get("adapter_version"),
+            "report_hash": row.get("report_hash"),
+            "attempt_count": int(row.get("attempt_count") or 0),
+            "started_at": row.get("started_at"),
+            "completed_at": row.get("completed_at"),
             "created_at": row.get("created_at"),
             "updated_at": row.get("updated_at"),
         }

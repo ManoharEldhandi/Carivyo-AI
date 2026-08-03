@@ -237,6 +237,26 @@ def test_empty_or_malformed_input_is_graceful_and_renormalized():
     assert "parse_rate" in empty["critical_failures"]
 
 
+def test_ats_v2_keeps_three_perspectives_separate_and_gates_partial_jd():
+    complete = analyze_resume(STRONG_RESUME, STRONG_METADATA, JOB_DESCRIPTION)
+    assessment = complete["assessment"]
+
+    assert assessment["legacy_score_deprecated"] is True
+    assert {assessment[key]["id"] for key in (
+        "compatibility", "evidence_alignment", "content_quality"
+    )} == {"compatibility", "evidence_alignment", "content_quality"}
+    assert "one universal ATS score" in assessment["explanation"]
+
+    partial = analyze_resume(
+        STRONG_RESUME,
+        STRONG_METADATA,
+        "Backend Engineer. Python and FastAPI experience preferred for building reliable services with a collaborative product engineering team in production. Work closely with peers and deliver software.",
+    )
+    assert partial["jd_quality"]["status"] == "partial"
+    assert partial["assessment"]["status"] == "insufficient_data"
+    assert partial["assessment"]["evidence_alignment"]["score"] is None
+
+
 def test_migration_creates_run_scoped_ats_analysis_table(tmp_path: Path):
     database = Database(
         tmp_path / "carivyo.db",

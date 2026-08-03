@@ -65,6 +65,7 @@ export function ResumeStudio({ job, onClose }: Props) {
   const [atsEngines, setAtsEngines] = useState<ATSEngine[]>([]);
   const [externalConsent, setExternalConsent] = useState(false);
   const [externalReport, setExternalReport] = useState<ExternalATSReport | null>(null);
+  const [riskAcknowledged, setRiskAcknowledged] = useState(false);
   const [sourceEditorOpen, setSourceEditorOpen] = useState(false);
   const [resumeSource, setResumeSource] = useState<ResumeSource | null>(null);
   const [sourceDraft, setSourceDraft] = useState("");
@@ -121,6 +122,7 @@ export function ResumeStudio({ job, onClose }: Props) {
   useEffect(() => {
     setExternalConsent(false);
     setExternalReport(null);
+    setRiskAcknowledged(false);
   }, [run?.id, run?.result?.variant]);
 
   useEffect(() => {
@@ -174,17 +176,6 @@ export function ResumeStudio({ job, onClose }: Props) {
     };
   }, [isRevising, run?.id, run?.result?.artifacts?.render, run?.result?.variant]);
 
-  const coverageCounts = useMemo(() => {
-    if (!run) return null;
-    return {
-      direct: run.result.coverage.direct?.length ?? 0,
-      transferable: run.result.coverage.transferable?.length ?? 0,
-      gaps:
-        (run.result.coverage.unsupported?.length ?? 0) +
-        (run.result.coverage.unclear?.length ?? 0)
-    };
-  }, [run]);
-
   const atsIssues = useMemo(
     () =>
       run?.result.ats_analysis.checks.filter(
@@ -192,7 +183,31 @@ export function ResumeStudio({ job, onClose }: Props) {
       ) ?? [],
     [run]
   );
+  const priorityActions = run?.result.ats_analysis.report_summary?.priority_actions ??
+    atsIssues.slice(0, 5).map((check) => ({
+      check_id: check.id,
+      label: check.label,
+      severity: check.status === "fail" ? "fail" as const : "warning" as const,
+      evidence: check.evidence,
+      suggestion: check.suggestion
+    }));
   const enhancvEngine = atsEngines.find((engine) => engine.id === "enhancv");
+  const assessment = run?.result.ats_analysis.assessment;
+  const perspectives = assessment
+    ? [assessment.compatibility, assessment.evidence_alignment, assessment.content_quality]
+    : [];
+  const structuredRequirements = run?.result.ats_analysis.structured_alignment?.requirements ?? [];
+  const unresolvedRequirements = structuredRequirements.filter(
+    (item) => item.match_status === "unsupported" || item.match_status === "listed_only"
+  );
+  const requiresRiskAcknowledgement = Boolean(
+    run &&
+      run.status !== "ready_to_apply" &&
+      (assessment?.status === "blocked" ||
+        assessment?.status === "needs_focus" ||
+        unresolvedRequirements.length > 0 ||
+        atsIssues.length > 0)
+  );
 
   async function create() {
     setBusy(true);
@@ -235,6 +250,10 @@ export function ResumeStudio({ job, onClose }: Props) {
     if (!run) return;
     if (!previewLoaded) {
       setError("Wait for the current resume preview to load before approving it.");
+      return;
+    }
+    if (requiresRiskAcknowledgement && !riskAcknowledged) {
+      setError("Review and acknowledge the unresolved requirements and priority actions before approval.");
       return;
     }
     setBusy(true);
@@ -576,24 +595,24 @@ export function ResumeStudio({ job, onClose }: Props) {
                 <small>{run.result.mode.replaceAll("_", " ")}</small>
               </div>
               <div>
-                <span>Direct coverage</span>
-                <strong>{coverageCounts?.direct ?? 0}</strong>
-                <small>proven requirements</small>
+                <span>JD confidence</span>
+                <strong>{run.result.ats_analysis.jd_quality?.confidence ?? "unknown"}</strong>
+                <small>{run.result.ats_analysis.jd_quality?.requirement_count ?? 0} requirements parsed</small>
               </div>
               <div>
-                <span>Transferable</span>
-                <strong>{coverageCounts?.transferable ?? 0}</strong>
-                <small>defensible matches</small>
+                <span>Compatibility</span>
+                <strong>{assessment?.compatibility.score === null || assessment?.compatibility.score === undefined ? "—" : `${Math.round(assessment.compatibility.score)}%`}</strong>
+                <small>{assessment?.compatibility.status?.replaceAll("_", " ") ?? "not assessed"}</small>
               </div>
-              <div className={(coverageCounts?.gaps ?? 0) ? "has-warning" : "is-positive"}>
-                <span>Visible gaps</span>
-                <strong>{coverageCounts?.gaps ?? 0}</strong>
-                <small>never concealed</small>
+              <div className={(unresolvedRequirements.length) ? "has-warning" : "is-positive"}>
+                <span>Evidence alignment</span>
+                <strong>{assessment?.evidence_alignment.score === null || assessment?.evidence_alignment.score === undefined ? "—" : `${Math.round(assessment.evidence_alignment.score)}%`}</strong>
+                <small>{unresolvedRequirements.length} unresolved requirements</small>
               </div>
-              <div className={run.result.ats_analysis.critical_failures.length ? "has-warning" : "is-positive"}>
-                <span>ATS readiness</span>
-                <strong>{Math.round(run.result.ats_analysis.overall_score)}</strong>
-                <small>{atsIssues.length} checks need attention</small>
+              <div className={atsIssues.length ? "has-warning" : "is-positive"}>
+                <span>Content review</span>
+                <strong>{assessment?.content_quality.score === null || assessment?.content_quality.score === undefined ? "—" : `${Math.round(assessment.content_quality.score)}%`}</strong>
+                <small>{atsIssues.length} exact actions</small>
               </div>
             </div>
 
@@ -674,11 +693,24 @@ export function ResumeStudio({ job, onClose }: Props) {
 
                 {run.status !== "ready_to_apply" ? (
                   <div className="review-actions review-actions--primary">
+                    {requiresRiskAcknowledgement ? (
+                      <label className="risk-acknowledgement">
+                        <input
+                          type="checkbox"
+                          checked={riskAcknowledged}
+                          onChange={(event) => setRiskAcknowledged(event.target.checked)}
+                        />
+                        <span>
+                          <strong>I reviewed the unresolved risks</strong>
+                          <small>Visible gaps remain truthful and will not be silently treated as matches.</small>
+                        </span>
+                      </label>
+                    ) : null}
                     <button
                       className="button button--primary button--wide"
                       type="button"
                       onClick={() => void approve()}
-                      disabled={busy || !previewLoaded}
+                      disabled={busy || !previewLoaded || (requiresRiskAcknowledgement && !riskAcknowledged)}
                       title={previewLoaded ? undefined : "Wait for the current preview to load"}
                     >
                       {busy ? <LoaderCircle className="spin" aria-hidden="true" /> : <Check aria-hidden="true" />}
@@ -767,6 +799,68 @@ export function ResumeStudio({ job, onClose }: Props) {
                   </section>
                 ) : null}
 
+                <section className="analysis-command-center" aria-labelledby="analysis-command-title">
+                  <div className="analysis-command-center__heading">
+                    <div>
+                      <p className="eyebrow">ATS v2 · decision workspace</p>
+                      <h4 id="analysis-command-title">What is proven, missing, and worth fixing</h4>
+                    </div>
+                    <span className={`assessment-state assessment-state--${assessment?.status ?? "unknown"}`}>
+                      {assessment?.status?.replaceAll("_", " ") ?? "analysis unavailable"}
+                    </span>
+                  </div>
+
+                  <div className={`jd-confidence jd-confidence--${run.result.ats_analysis.jd_quality?.status ?? "unknown"}`}>
+                    <ShieldCheck aria-hidden="true" />
+                    <div>
+                      <strong>
+                        Job description {run.result.ats_analysis.jd_quality?.status ?? "not classified"} · {run.result.ats_analysis.jd_quality?.confidence ?? "unknown"} confidence
+                      </strong>
+                      <span>{run.result.ats_analysis.jd_quality?.reason ?? "A complete official description is required for job-specific alignment."}</span>
+                    </div>
+                  </div>
+
+                  <div className="perspective-grid">
+                    {perspectives.map((perspective) => (
+                      <article key={perspective.id} className={`perspective-card perspective-card--${perspective.status}`}>
+                        <span>{perspective.label}</span>
+                        <strong>{perspective.score === null ? "Not scored" : `${Math.round(perspective.score ?? 0)}%`}</strong>
+                        <small>{perspective.status.replaceAll("_", " ")}</small>
+                      </article>
+                    ))}
+                  </div>
+
+                  <div className="analysis-worklist">
+                    <div>
+                      <span className="field-label">Exact priority actions</span>
+                      {priorityActions.length ? (
+                        <ol>
+                          {priorityActions.map((action) => (
+                            <li key={action.check_id}>
+                              <strong>{action.label}</strong>
+                              <span>{action.suggestion}</span>
+                            </li>
+                          ))}
+                        </ol>
+                      ) : <p className="muted">No deterministic action is required.</p>}
+                    </div>
+                    <div>
+                      <span className="field-label">Required and preferred gaps</span>
+                      {unresolvedRequirements.length ? (
+                        <ul>
+                          {unresolvedRequirements.slice(0, 8).map((item) => (
+                            <li key={item.id}>
+                              <strong>{item.priority}</strong>
+                              <span>{item.text}</span>
+                              <small>{item.match_status?.replaceAll("_", " ")}</small>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : <p className="muted">No structured requirement gap was detected.</p>}
+                    </div>
+                  </div>
+                </section>
+
                 <details className="resume-supporting-details">
                   <summary>Why this resume matches</summary>
                   <div className="resume-supporting-details__body">
@@ -814,17 +908,14 @@ export function ResumeStudio({ job, onClose }: Props) {
                             <p className="eyebrow">On-device decision support</p>
                             <h4>Hiring-manager lens</h4>
                           </div>
-                          <strong>{Math.round(run.result.hiring_evaluation.score ?? 0)}/100</strong>
+                          <strong>{run.result.hiring_evaluation.verdict?.replaceAll("_", " ") ?? "Advisory"}</strong>
                         </div>
                         <p className="muted">
                           {run.result.hiring_evaluation.disclaimer}
                         </p>
                         {run.result.hiring_evaluation.score_basis ? (
                           <p className="muted">
-                            Composite score: {run.result.hiring_evaluation.score_basis}.
-                            {run.result.hiring_evaluation.raw_model_score !== undefined
-                              ? ` Raw local-model score: ${Math.round(run.result.hiring_evaluation.raw_model_score)}/100.`
-                              : ""}
+                            {run.result.hiring_evaluation.score_basis}.
                           </p>
                         ) : null}
                         <div className="ats-categories">
@@ -899,7 +990,7 @@ export function ResumeStudio({ job, onClose }: Props) {
                   <div className="ats-report__heading">
                     <div>
                       <p className="eyebrow">27 checks</p>
-                      <h4 id="ats-report-title">ATS readiness</h4>
+                      <h4 id="ats-report-title">Detailed submission checks</h4>
                     </div>
                     <div className="ats-engine-toggle" role="radiogroup" aria-label="ATS report engine">
                       <button
@@ -931,60 +1022,19 @@ export function ResumeStudio({ job, onClose }: Props) {
                       </button>
                     </div>
 
-                  <div className="ats-overview">
-                    <div
-                      className="ats-score"
-                      aria-label={`Resume diagnostic ${Math.round(run.result.ats_analysis.overall_score)} out of 100`}
-                    >
-                      <Gauge aria-hidden="true" />
-                      <strong>{Math.round(run.result.ats_analysis.overall_score)}</strong>
-                      <span>diagnostic</span>
-                    </div>
-                    <div className="ats-overview__facts">
-                      <div>
-                        <span>Text parse rate</span>
-                        <strong>{Math.round(run.result.ats_analysis.parse_rate)}%</strong>
-                      </div>
-                      <div>
-                        <span>Applicable checks</span>
-                        <strong>
-                          {27 - run.result.ats_analysis.scoring.not_applicable_check_ids.length}/27
-                        </strong>
-                      </div>
-                      <div>
-                        <span>Critical failures</span>
-                        <strong>{run.result.ats_analysis.critical_failures.length}</strong>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="ats-categories" aria-label="Diagnostic category results">
-                    {run.result.ats_analysis.category_summaries.map((category) => (
-                      <div key={category.id}>
-                        <span>{category.label}</span>
-                        <strong>{category.percentage === null ? "N/A" : `${Math.round(category.percentage)}%`}</strong>
-                        <span className="ats-category-track" aria-hidden="true">
-                          <span style={{ width: `${category.percentage ?? 0}%` }} />
-                        </span>
-                      </div>
+                  <div className="perspective-grid perspective-grid--report" aria-label="Independent ATS perspectives">
+                    {perspectives.map((perspective) => (
+                      <article key={perspective.id} className={`perspective-card perspective-card--${perspective.status}`}>
+                        <span>{perspective.label}</span>
+                        <strong>{perspective.score === null ? "Not scored" : `${Math.round(perspective.score ?? 0)}%`}</strong>
+                        <small>{perspective.status.replaceAll("_", " ")}</small>
+                      </article>
                     ))}
                   </div>
-
-                  <div className="ats-comparison" aria-label="Before and after diagnostic comparison">
-                    <div>
-                      <span>Imported resume</span>
-                      <strong>{Math.round(run.result.ats_comparison.baseline_score)}</strong>
-                    </div>
-                    <div>
-                      <span>This version</span>
-                      <strong>{Math.round(run.result.ats_comparison.current_score)}</strong>
-                    </div>
-                    <div className={run.result.ats_comparison.score_delta >= 0 ? "is-positive" : "has-warning"}>
-                      <span>Change</span>
-                      <strong>{run.result.ats_comparison.score_delta >= 0 ? "+" : ""}{run.result.ats_comparison.score_delta}</strong>
-                    </div>
-                  </div>
-                  <p className="muted">{run.result.ats_comparison.baseline_scope}</p>
+                  <p className="muted">
+                    {assessment?.explanation ?? "Compatibility, evidence alignment, and content quality are reviewed independently."}
+                    {` Parser consensus: ${Math.round(run.result.ats_analysis.parse_rate)}%.`}
+                  </p>
 
                   {atsIssues.length ? (
                     <div className="ats-issues">

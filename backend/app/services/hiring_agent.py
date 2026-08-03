@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -38,7 +39,7 @@ class LocalHiringAgent:
     reject a resume.
     """
 
-    VERSION = "carivyo-local-hiring-agent-1.0.0"
+    VERSION = "carivyo-local-hiring-agent-2.0.0"
 
     def __init__(
         self,
@@ -58,7 +59,8 @@ class LocalHiringAgent:
         claims: Sequence[Dict[str, Any]],
         requirements: Sequence[Dict[str, Any]],
         section_inventory: Sequence[Dict[str, Any]],
-        deterministic_ats_score: float,
+        deterministic_assessment: Dict[str, Any] | None = None,
+        deterministic_ats_score: float | None = None,
     ) -> Dict[str, Any]:
         if not self.enabled:
             return self._not_run("disabled", "Local hiring evaluation is disabled")
@@ -82,6 +84,11 @@ class LocalHiringAgent:
         ]
         review_evidence = self._bounded_evidence(evidence, requirement_text)
         review_requirements = [self._clip(item, 220) for item in requirement_text[:10]]
+        baselines = self._dimension_baselines(
+            evidence,
+            requirements,
+            section_inventory,
+        )
         payload = {
             "approved_resume_evidence": review_evidence,
             "job_requirements": review_requirements,
@@ -94,7 +101,10 @@ class LocalHiringAgent:
                 }
                 for item in section_inventory
             ],
-            "deterministic_ats_score": deterministic_ats_score,
+            "dimension_evidence_baselines": baselines,
+            "compatibility_context": (deterministic_assessment or {}).get(
+                "compatibility"
+            ),
         }
         prompt = self._prompt(payload)
         trace_id = new_id()
@@ -113,7 +123,7 @@ class LocalHiringAgent:
                 evidence=evidence,
                 requirements=requirement_text,
                 section_inventory=section_inventory,
-                deterministic_ats_score=deterministic_ats_score,
+                deterministic_baselines=baselines,
                 runtime_result=runtime_result,
             )
             self._record_run(
@@ -209,7 +219,7 @@ class LocalHiringAgent:
         evidence: Sequence[Dict[str, str]],
         requirements: Sequence[str],
         section_inventory: Sequence[Dict[str, Any]],
-        deterministic_ats_score: float,
+        deterministic_baselines: Dict[str, Dict[str, Any]],
         runtime_result: Dict[str, Any],
     ) -> Dict[str, Any]:
         dimensions = []
@@ -228,11 +238,8 @@ class LocalHiringAgent:
                 float(getattr(response, dimension_id)),
                 float(maximum),
             )
-            deterministic_baseline = (
-                min(max(float(deterministic_ats_score), 0.0), 100.0)
-                / 100.0
-                * maximum
-            )
+            baseline = deterministic_baselines[dimension_id]
+            deterministic_baseline = float(baseline["score"])
             score = 0.75 * deterministic_baseline + 0.25 * model_score
             scoped = [
                 item
@@ -266,7 +273,9 @@ class LocalHiringAgent:
                     "raw_model_score": model_score,
                     "evidence_ids": verified_evidence_ids,
                     "requirement_indices": verified_requirement_indices,
-                    "rationale": response.summary,
+                    "deterministic_baseline": round(deterministic_baseline, 2),
+                    "deterministic_evidence": baseline["evidence"],
+                    "rationale": f"{baseline['rationale']} Local review: {response.summary}",
                 }
             )
 
@@ -319,10 +328,9 @@ class LocalHiringAgent:
             "score": score,
             "max_score": 100,
             "raw_model_score": round(model_total, 1),
-            "deterministic_ats_score": round(float(deterministic_ats_score), 1),
             "score_basis": (
-                "75% deterministic evidence coverage and 25% local hiring-manager "
-                "judgment"
+                "Each dimension independently blends 75% dimension-specific "
+                "deterministic evidence and 25% local hiring-manager judgment"
             ),
             "verdict": verdict,
             "dimensions": dimensions,
@@ -342,6 +350,73 @@ class LocalHiringAgent:
                 "Local AI decision support is advisory. Carivyo's deterministic "
                 "validation and the user's review remain authoritative."
             ),
+        }
+
+    @classmethod
+    def _dimension_baselines(
+        cls,
+        evidence: Sequence[Dict[str, str]],
+        requirements: Sequence[Dict[str, Any]],
+        section_inventory: Sequence[Dict[str, Any]],
+    ) -> Dict[str, Dict[str, Any]]:
+        def scaled(ratio: float, dimension: str) -> float:
+            return round(max(0.0, min(1.0, ratio)) * DIMENSION_MAXIMUMS[dimension], 2)
+
+        def coverage(items: Sequence[Dict[str, Any]]) -> float:
+            if not items:
+                return 0.0
+            values = {"direct": 1.0, "transferable": 0.55, "listed_only": 0.35}
+            return sum(values.get(str(item.get("classification") or ""), 0.0) for item in items) / len(items)
+
+        technical = [
+            item for item in requirements if item.get("category") == "technical_skill"
+        ]
+        priority = [
+            item for item in requirements if item.get("priority") in {"required", "responsibility"}
+        ] or list(requirements)
+        experience = [
+            item for item in evidence if item["category"] in {"experience", "leadership", "volunteer"}
+        ]
+        projects = [
+            item for item in evidence if item["category"] in {"projects", "achievements", "publications"}
+        ]
+        impact_pattern = re.compile(
+            r"\b\d+(?:\.\d+)?\s*(?:%|x|k|m|million|billion|ms|hours?|users?|requests?)?\b",
+            re.IGNORECASE,
+        )
+        strong_experience = sum(bool(impact_pattern.search(item["text"])) for item in experience)
+        strong_projects = sum(bool(impact_pattern.search(item["text"])) for item in projects)
+        experience_ratio = min(1.0, len(experience) / 4) * 0.6 + min(1.0, strong_experience / 2) * 0.4
+        project_ratio = min(1.0, len(projects) / 3) * 0.55 + min(1.0, strong_projects / 2) * 0.45
+        expected = [item for item in section_inventory if item.get("expected")]
+        present = [item for item in expected if item.get("present") and int(item.get("claim_count") or 0) > 0]
+        clarity_ratio = len(present) / len(expected) if expected else 0.0
+        return {
+            "technical_fit": {
+                "score": scaled(coverage(technical), "technical_fit"),
+                "evidence": [str(item.get("requirement_id") or item.get("requirement") or "") for item in technical[:6]],
+                "rationale": "Technical fit is based only on independently matched technical requirements.",
+            },
+            "experience_evidence": {
+                "score": scaled(experience_ratio, "experience_evidence"),
+                "evidence": [item["id"] for item in experience[:6]],
+                "rationale": "Experience evidence reflects demonstrated claims and quantified specificity.",
+            },
+            "project_impact": {
+                "score": scaled(project_ratio, "project_impact"),
+                "evidence": [item["id"] for item in projects[:6]],
+                "rationale": "Project impact reflects project evidence and measurable outcomes.",
+            },
+            "job_alignment": {
+                "score": scaled(coverage(priority), "job_alignment"),
+                "evidence": [str(item.get("requirement_id") or item.get("requirement") or "") for item in priority[:6]],
+                "rationale": "Job alignment reflects required and responsibility coverage, not ATS formatting.",
+            },
+            "completeness_clarity": {
+                "score": scaled(clarity_ratio, "completeness_clarity"),
+                "evidence": [str(item.get("id") or "") for item in present],
+                "rationale": "Completeness reflects expected sections with extracted evidence.",
+            },
         }
 
     @classmethod

@@ -16,7 +16,7 @@ keeps third-party comparisons outside the product runtime.
 
 ## Analyzer contract
 
-Version `carivyo-ats-1.1.0` evaluates 27 checks in seven categories:
+Version `carivyo-ats-2.0.0` evaluates 27 checks in seven categories:
 
 | Category | Weight | Checks |
 | --- | ---: | ---: |
@@ -29,17 +29,16 @@ Version `carivyo-ats-1.1.0` evaluates 27 checks in seven categories:
 | Seniority and impact | 14 | 3 |
 
 Every check returns an identifier, label, status, earned and available points,
-evidence, and a safe suggested action. `not_applicable` checks contribute
-neither earned nor available points. The displayed diagnostic is:
+evidence, and a safe suggested action. The product does not display one
+renormalized universal score. It exposes submission compatibility,
+evidence-backed job alignment, and content quality as independent perspectives.
 
-```text
-overall = earned points / applicable available points × 100
-```
-
-The report separately exposes parse rate, category percentages, critical
-failures, applicability, highest-value fixes, strengths, JD skill alignment,
-interview probes, and listed-versus-demonstrated skill evidence. A critical
-parse failure makes readiness `blocked` regardless of the aggregate number.
+The legacy aggregate remains in versioned JSON only for migration and is marked
+deprecated. Job alignment is withheld unless the official JD contains complete
+responsibilities and qualifications. Structured requirements are matched
+against resume fields, distinguishing a Skills-list mention from demonstrated
+experience, projects, achievements, leadership, or publications. Independent
+`pypdf` and Poppler extraction must agree, and every page is visually checked.
 
 ## Safety properties
 
@@ -99,9 +98,10 @@ numeric equivalence:
 An authorized live integration check on 2026-07-21 completed in JD-tailored
 mode for an existing test PDF/JD and returned overall 26, generic 48, and a
 tailoring category of 19. This proves the adapter captured a real tailored
-report; it is not an ATS-quality benchmark or parity measurement. Only one
-compact final report is retained after temporary HTML, screenshots, logs, and
-generic intermediates are removed.
+report; it is not an ATS-quality benchmark or parity measurement. Immutable,
+versioned compact reports are retained after temporary HTML, screenshots, logs,
+and generic intermediates are removed. Consent binds actual PDF and JD byte
+hashes, and a strict adapter schema rejects malformed output.
 
 ## Calibration and the 98% benchmark goal
 
@@ -148,9 +148,9 @@ Current measurable release gates are:
 6. Human review of recruiter-risk prompts and counterfactual bias cases before
    any claim of broader parity.
 
-The repository currently proves items 1–3 and 5 on synthetic and regression
-fixtures. The committed synthetic benchmark has two cases and 15 labeled
-outcomes; its 1.0 precision/recall is a regression check, not general accuracy.
-Vendor agreement is currently `null`. Item 4 requires a larger licensed or
-user-consented anonymized corpus; item 6 remains a release process, not an
-automated certification.
+The repository currently proves items 1–3 and 5 on regression fixtures. The
+committed benchmark renders and parses 100 actual anonymized PDF artifacts
+across ten role families, with 1.0000 precision and 0.9857 recall over 800
+labeled decisions. Its two published false negatives and limitations are in
+`docs/ats-benchmark-v2.md`; this is not applicant-population accuracy. Vendor
+agreement remains `null` pending a licensed or user-consented corpus.

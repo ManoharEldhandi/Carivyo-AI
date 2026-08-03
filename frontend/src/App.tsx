@@ -44,7 +44,8 @@ export function App() {
       setRuntime({
         providers: runtimeResponse.providers ?? [],
         mode: runtimeResponse.mode ?? "degraded",
-        selection: runtimeResponse.selection ?? deterministicRuntime.selection
+        selection: runtimeResponse.selection ?? deterministicRuntime.selection,
+        execution: runtimeResponse.execution
       });
       setProfile(
         "onboarding_required" in profileResponse ? null : profileResponse
@@ -86,6 +87,7 @@ export function App() {
       setRuntime({
         providers: response.providers,
         selection: response.selection,
+        execution: response.execution,
         mode: response.providers.some((provider) => provider.available)
           ? "ai_available"
           : "degraded"

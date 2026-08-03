@@ -63,7 +63,9 @@ the local application record.
   SQL findings use fixed identifiers or generated placeholder counts with
   parameterized values, and its low findings are expected allowlisted
   subprocess/public-board-token patterns.
-- ATS synthetic benchmark: two cases, deterministic repeatability 1.0,
+- ATS anonymized PDF benchmark: 100 cases across ten role families,
+  deterministic repeatability 1.0, issue precision 1.0, recall 0.9857, and
+  published case-level analysis of the two false negatives,
   labeled issue precision 1.0, labeled issue recall 1.0. Vendor agreement is
   deliberately `null` because no authorized anonymized vendor corpus exists.
 

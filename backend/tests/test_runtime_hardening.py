@@ -9,6 +9,7 @@ from starlette.requests import Request
 
 from app.config import Settings
 from app.security import SessionSecurity
+from app.schemas import RuntimeProvider
 from app.services.runtime import RuntimeGateway, RuntimeUnavailable
 
 
@@ -45,6 +46,7 @@ def test_ollama_cloud_pointers_are_not_reported_as_local(settings, monkeypatch):
         "provider": "ollama",
         "model": "llama-local:latest",
         "reasoning_effort": "none",
+        "fully_local": False,
     }
 
 
@@ -63,6 +65,36 @@ def test_codex_discovery_requires_authentication(settings, monkeypatch):
     assert provider.available is False
     assert provider.authenticated is False
     assert provider.supports_sessions is False
+
+
+def test_fully_local_mode_never_falls_back_to_provider_runtime(settings, monkeypatch):
+    gateway = RuntimeGateway(settings)
+    monkeypatch.setattr(
+        gateway,
+        "selection",
+        lambda: {
+            "provider": "ollama",
+            "model": "local-model",
+            "reasoning_effort": "none",
+            "fully_local": True,
+        },
+    )
+    monkeypatch.setattr(
+        gateway,
+        "discover",
+        lambda: [
+            RuntimeProvider(
+                id="codex",
+                name="Codex",
+                kind="cli",
+                available=True,
+                privacy="provider",
+            )
+        ],
+    )
+
+    with pytest.raises(RuntimeUnavailable, match="Ollama has no available local model"):
+        gateway.resolve_provider("auto")
 
 
 def test_newest_codex_binary_is_selected(tmp_path, monkeypatch):

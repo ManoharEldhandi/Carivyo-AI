@@ -286,8 +286,9 @@ export function JobsPage({
     <>
       <section className="jobs-header" aria-labelledby="jobs-title">
         <div>
+          <p className="eyebrow">Opportunity intelligence</p>
           <h1 id="jobs-title">Jobs</h1>
-          <p>Fresh, verified roles matching your priorities.</p>
+          <p>Live roles, verified at the source and ranked around your evidence.</p>
         </div>
         <div className="jobs-header__actions">
           <button

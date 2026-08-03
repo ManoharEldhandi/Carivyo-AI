@@ -10,7 +10,7 @@
     "posted_hours_ago": 5,
     "posted_semantics": "first_published",
     "apply_url": "https://jobs.example.com/acme/gh-101",
-    "description": "Build Python and FastAPI services, design REST APIs, work with PostgreSQL, Docker, and AWS. Candidates should have 0-2 years of software engineering experience and strong backend fundamentals."
+    "description": "Responsibilities: Build Python and FastAPI services, design REST APIs, and operate PostgreSQL workloads using Docker and AWS. Improve reliability, review code, test production changes, and collaborate with product stakeholders. Requirements: Candidates must demonstrate backend software engineering fundamentals, API delivery, SQL knowledge, and evidence of shipping maintainable systems. Zero to two years of professional or substantial project experience is accepted. Preferred: Kubernetes exposure and documented performance improvements."
   },
   {
     "connector_id": "fixture-lever",
@@ -23,7 +23,7 @@
     "posted_hours_ago": 18,
     "posted_semantics": "createdAt",
     "apply_url": "https://jobs.example.com/orbit/lever-202",
-    "description": "Develop RAG and LLM applications using Python, FastAPI, vector retrieval, Docker, and cloud infrastructure. Experience building AI agents and reliable evaluation workflows is preferred."
+    "description": "Responsibilities: Develop RAG and LLM applications using Python, FastAPI, vector retrieval, Docker, and cloud infrastructure. Build evaluation workflows, test model outputs, monitor retrieval quality, and collaborate with backend and product engineers. Requirements: Candidates must demonstrate Python delivery, grounded AI application development, API integration, and measurable project outcomes. Professional, internship, research, or substantial open-source evidence is accepted. Preferred: Experience with PyTorch, AWS, and reliable AI-agent evaluation."
   },
   {
     "connector_id": "fixture-ashby",
@@ -36,6 +36,6 @@
     "posted_hours_ago": 31,
     "posted_semantics": "publishedAt",
     "apply_url": "https://jobs.example.com/nova/ashby-303",
-    "description": "Design and develop software in Python or Java, contribute to APIs, SQL systems, automated tests, Git workflows, and production support. This is an early-career engineering role."
+    "description": "Responsibilities: Design and develop software in Python or Java, contribute to APIs and SQL systems, add automated tests, use Git workflows, and support production services. Investigate defects and collaborate with engineering peers. Requirements: Candidates must demonstrate programming fundamentals, data structures, debugging, and evidence of completing software projects. This is an early-career role accepting graduate, internship, or project experience. Preferred: REST API, Docker, and cloud deployment exposure."
   }
 ]

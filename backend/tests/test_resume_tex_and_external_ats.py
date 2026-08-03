@@ -250,7 +250,7 @@ Path(a.screenshot).write_bytes(b'temporary')
         "enhancv-browser-profile"
     ]
 
-    final_path = Path(run["workspace_path"]) / "reports" / "enhancv-final.json"
+    final_path = Path(latest["artifact_path"])
     assert final_path.is_file()
     final = json.loads(final_path.read_text(encoding="utf-8"))
     assert final["score"] == 88
@@ -266,4 +266,8 @@ Path(a.screenshot).write_bytes(b'temporary')
     rejected = service.get(report["id"])
     assert rejected["status"] == "failed"
     assert "changed after consent" in rejected["error"]
-    assert not final_path.exists()
+    assert final_path.exists()
+    history = service.history(run["id"])
+    assert len(history) == 2
+    assert all(item["adapter_version"] == service.ADAPTER_VERSION for item in history)
+    assert next(item for item in history if item["status"] == "complete")["report_hash"]

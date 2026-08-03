@@ -6,13 +6,21 @@ from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 from urllib.parse import urlparse
 
+from app.services.requirements import (
+    SOFT_SKILL_ALIASES as STRUCTURED_SOFT_SKILLS,
+    TECHNOLOGY_ALIASES as STRUCTURED_HARD_SKILLS,
+    analyze_job_description,
+    extract_catalog_terms as extract_structured_catalog_terms,
+    match_requirements,
+)
 
-ANALYZER_VERSION = "carivyo-ats-1.1.0"
+
+ANALYZER_VERSION = "carivyo-ats-2.0.0"
 DISCLAIMER = (
-    "No universal ATS score exists. This Carivyo score is an independent, "
-    "deterministic heuristic based on publicly described resume-quality "
-    "categories. It does not reproduce a vendor's proprietary scoring, predict "
-    "hiring outcomes, or verify the truth of candidate claims."
+    "No universal ATS score exists. Carivyo reports independent submission "
+    "compatibility, evidence alignment, and content-review perspectives using "
+    "deterministic public criteria. It does not reproduce a vendor's proprietary "
+    "scoring, predict hiring outcomes, or verify the truth of candidate claims."
 )
 
 MAX_INPUT_CHARACTERS = 2_000_000
@@ -278,6 +286,11 @@ SOFT_SKILLS: Mapping[str, Tuple[str, ...]] = {
     "Time management": ("time management", "prioritization", "prioritized"),
 }
 
+# ATS v2 uses the shared requirement normalizer so discovery, matching, resume
+# design, and analysis cannot silently disagree about recognized terminology.
+HARD_SKILLS = STRUCTURED_HARD_SKILLS
+SOFT_SKILLS = STRUCTURED_SOFT_SKILLS
+
 COMMON_TYPOS = {
     "acheived": "achieved",
     "alot": "a lot",
@@ -446,6 +459,88 @@ class ATSAnalyzer:
         )
         job_alignment = _job_alignment_report(context)
         recruiter_insights = _recruiter_insight_report(context)
+        jd_quality = analyze_job_description(
+            job_description,
+            _metadata_text(safe_metadata, "job_title", "jd_title", "target_title"),
+        )
+        structured_alignment = match_requirements(
+            jd_quality["requirements"], context.sections
+        )
+        compatibility = _perspective_summary(
+            "compatibility",
+            "Submission compatibility",
+            checks,
+            {
+                "file_format_size",
+                "design",
+                "professional_email",
+                "header_links",
+                "filename",
+                "date_link_consistency",
+                "essential_sections",
+                "contact",
+                "section_order",
+                "parse_rate",
+            },
+        )
+        content_quality = _perspective_summary(
+            "content_quality",
+            "Content quality",
+            checks,
+            {
+                "quantified_impact",
+                "repetition",
+                "spelling_grammar",
+                "bullet_length_consistency",
+                "action_verbs",
+                "credibility",
+                "interview_risk",
+                "skills_evidence",
+            },
+        )
+        alignment_status = (
+            "insufficient_data"
+            if jd_quality["status"] != "complete"
+            else "strong"
+            if (structured_alignment.get("score") or 0) >= 80
+            else "review"
+            if (structured_alignment.get("score") or 0) >= 55
+            else "needs_focus"
+        )
+        evidence_alignment = {
+            "id": "evidence_alignment",
+            "label": "Evidence-backed job alignment",
+            "status": alignment_status,
+            "score": (
+                structured_alignment.get("score")
+                if jd_quality["status"] == "complete"
+                else None
+            ),
+            "confidence": jd_quality["confidence"],
+            "required_score": structured_alignment.get("required_score"),
+            "preferred_score": structured_alignment.get("preferred_score"),
+            "responsibility_score": structured_alignment.get("responsibility_score"),
+            "counts": structured_alignment.get("counts", {}),
+            "requirement_count": jd_quality["requirement_count"],
+            "note": (
+                "No job-fit score is produced until a complete official job description is available."
+                if jd_quality["status"] != "complete"
+                else "Required, preferred, and responsibility evidence are reported separately."
+            ),
+        }
+        assessment_status = (
+            "blocked"
+            if compatibility["status"] == "blocked"
+            else "insufficient_data"
+            if jd_quality["status"] != "complete"
+            else "needs_focus"
+            if "needs_focus"
+            in {compatibility["status"], content_quality["status"], alignment_status}
+            else "review"
+            if "review"
+            in {compatibility["status"], content_quality["status"], alignment_status}
+            else "strong"
+        )
         return {
             "overall_score": overall_score,
             "parse_rate": parse_rate,
@@ -509,6 +604,29 @@ class ATSAnalyzer:
             },
             "job_alignment": job_alignment,
             "recruiter_insights": recruiter_insights,
+            "jd_quality": jd_quality,
+            "structured_alignment": structured_alignment,
+            "assessment": {
+                "version": "carivyo-ats-perspectives-2.0.0",
+                "status": assessment_status,
+                "confidence": (
+                    "high"
+                    if jd_quality["confidence"] == "high"
+                    and compatibility["coverage"] >= 0.9
+                    else "medium"
+                    if jd_quality["status"] == "complete"
+                    else "unavailable"
+                ),
+                "compatibility": compatibility,
+                "evidence_alignment": evidence_alignment,
+                "content_quality": content_quality,
+                "legacy_overall_score": overall_score,
+                "legacy_score_deprecated": True,
+                "explanation": (
+                    "Carivyo does not combine parser compatibility, job alignment, and "
+                    "content quality into one universal ATS score."
+                ),
+            },
         }
 
     @staticmethod
@@ -952,20 +1070,55 @@ class ATSAnalyzer:
                 "Supply the target job description to measure hard-skill alignment.",
                 "No job description was supplied.",
             )
-        required = _extract_catalog_terms(context.jd_text, HARD_SKILLS)
-        if not required:
+        jd_quality = analyze_job_description(
+            context.jd_text, _target_job_title(context)
+        )
+        technical_requirements = [
+            item
+            for item in jd_quality["requirements"]
+            if item.get("category") == "technical_skill"
+        ]
+        if not technical_requirements:
             return _na(
-                "The job description contains no hard skill recognized by this version's public dictionary.",
-                "No recognized hard-skill requirement was available for comparison.",
+                "Obtain a complete official job description before judging technical alignment.",
+                "No structured technical requirement was available for comparison.",
             )
-        resume_terms = set(_extract_catalog_terms(context.text, HARD_SKILLS))
-        matched = [term for term in required if term in resume_terms]
+        alignment = match_requirements(technical_requirements, context.sections)
+        values = {
+            "direct": 1.0,
+            "listed_only": 0.65,
+            "transferable": 0.5,
+            "unsupported": 0.0,
+        }
+        matched = [
+            item
+            for item in alignment["requirements"]
+            if item["match_status"] != "unsupported"
+        ]
+        demonstrated = [
+            item
+            for item in alignment["requirements"]
+            if item["match_status"] == "direct"
+        ]
+        ratio = sum(
+            values.get(item["match_status"], 0.0)
+            for item in alignment["requirements"]
+        ) / len(alignment["requirements"])
         return CheckOutcome(
-            len(matched) / len(required),
+            ratio,
             (
-                f"Matched {len(matched)}/{len(required)} recognized JD hard skills.",
-                "Matched: " + (", ".join(matched) if matched else "none") + ".",
-                "Unmatched: " + (", ".join(term for term in required if term not in resume_terms) or "none") + ".",
+                f"Matched {len(matched)}/{len(technical_requirements)} structured technical requirements.",
+                f"{len(demonstrated)} requirement(s) are demonstrated outside the Skills list.",
+                "Unsupported: "
+                + (
+                    "; ".join(
+                        item["text"]
+                        for item in alignment["requirements"]
+                        if item["match_status"] == "unsupported"
+                    )[:500]
+                    or "none"
+                )
+                + ".",
             ),
             "Add only missing hard skills that are supported by the candidate's actual experience.",
         )
@@ -976,19 +1129,42 @@ class ATSAnalyzer:
                 "Supply the target job description to measure soft-skill alignment.",
                 "No job description was supplied.",
             )
-        required = _extract_catalog_terms(context.jd_text, SOFT_SKILLS)
-        if not required:
+        jd_quality = analyze_job_description(
+            context.jd_text, _target_job_title(context)
+        )
+        soft_requirements = [
+            item
+            for item in jd_quality["requirements"]
+            if item.get("category") == "soft_skill"
+        ]
+        if not soft_requirements:
             return _na(
                 "No explicit soft-skill requirement was recognized in the job description.",
                 "No recognized soft-skill requirement was available for comparison.",
             )
-        resume_terms = set(_extract_catalog_terms(context.text, SOFT_SKILLS))
-        matched = [term for term in required if term in resume_terms]
+        alignment = match_requirements(soft_requirements, context.sections)
+        values = {
+            "direct": 1.0,
+            "listed_only": 0.65,
+            "transferable": 0.5,
+            "unsupported": 0.0,
+        }
+        matched = [
+            item
+            for item in alignment["requirements"]
+            if item["match_status"] != "unsupported"
+        ]
         return CheckOutcome(
-            len(matched) / len(required),
+            sum(
+                values.get(item["match_status"], 0.0)
+                for item in alignment["requirements"]
+            )
+            / len(alignment["requirements"]),
             (
-                f"Matched {len(matched)}/{len(required)} explicitly stated JD soft skills.",
-                "Matched: " + (", ".join(matched) if matched else "none") + ".",
+                f"Matched {len(matched)}/{len(soft_requirements)} structured soft-skill requirements.",
+                "Matched evidence fields: "
+                + (", ".join(sorted({str(item.get('best_field')) for item in matched if item.get('best_field')})) or "none")
+                + ".",
             ),
             "Demonstrate requested soft skills through truthful actions and outcomes, not unsupported keyword lists.",
         )
@@ -1290,6 +1466,53 @@ def analyze_resume(
     """Convenience entry point for Carivyo's first-party ATS analyzer."""
 
     return ATSAnalyzer().analyze(resume_text, metadata, jd_text, **kwargs)
+
+
+def _perspective_summary(
+    perspective_id: str,
+    label: str,
+    checks: Sequence[Mapping[str, Any]],
+    check_ids: set[str],
+) -> Dict[str, Any]:
+    selected = [check for check in checks if check.get("id") in check_ids]
+    configured = sum(float(check.get("max_score") or 0) for check in selected)
+    applicable = [
+        check for check in selected if check.get("status") != "not_applicable"
+    ]
+    available = sum(float(check.get("max_score") or 0) for check in applicable)
+    earned = sum(float(check.get("score") or 0) for check in applicable)
+    score = round(earned / available * 100, 1) if available else None
+    critical_failures = [
+        str(check.get("id"))
+        for check in applicable
+        if check.get("id") in CRITICAL_CHECK_IDS and check.get("status") == "fail"
+    ]
+    failures = sum(check.get("status") == "fail" for check in applicable)
+    warnings = sum(check.get("status") == "warning" for check in applicable)
+    status = (
+        "blocked"
+        if critical_failures
+        else "needs_focus"
+        if failures
+        else "review"
+        if warnings or available < configured
+        else "strong"
+    )
+    return {
+        "id": perspective_id,
+        "label": label,
+        "status": status,
+        "score": score,
+        "coverage": round(available / configured, 3) if configured else 0.0,
+        "applicable_checks": len(applicable),
+        "total_checks": len(selected),
+        "critical_failures": critical_failures,
+        "issues": [
+            str(check.get("id"))
+            for check in applicable
+            if check.get("status") in {"fail", "warning"}
+        ],
+    }
 
 
 analyze_ats = analyze_resume
@@ -1626,10 +1849,18 @@ def _job_alignment_report(context: AnalysisContext) -> Dict[str, Any]:
             "note": "No job description was supplied; no job-fit claim is made.",
         }
 
-    required_hard = _extract_catalog_terms(context.jd_text, HARD_SKILLS)
+    jd_quality = analyze_job_description(
+        context.jd_text, _target_job_title(context)
+    )
+    structured = match_requirements(jd_quality["requirements"], context.sections)
+    required_hard = extract_structured_catalog_terms(
+        context.jd_text, STRUCTURED_HARD_SKILLS
+    )
     resume_hard = set(_extract_catalog_terms(context.text, HARD_SKILLS))
     matched_hard = [term for term in required_hard if term in resume_hard]
-    required_soft = _extract_catalog_terms(context.jd_text, SOFT_SKILLS)
+    required_soft = extract_structured_catalog_terms(
+        context.jd_text, STRUCTURED_SOFT_SKILLS
+    )
     resume_soft = set(_extract_catalog_terms(context.text, SOFT_SKILLS))
     matched_soft = [term for term in required_soft if term in resume_soft]
     action_verbs = sorted(
@@ -1655,6 +1886,12 @@ def _job_alignment_report(context: AnalysisContext) -> Dict[str, Any]:
             "missing": [term for term in required_soft if term not in resume_soft],
         },
         "action_verbs_present": action_verbs,
+        "jd_quality": {
+            key: value
+            for key, value in jd_quality.items()
+            if key != "requirements"
+        },
+        "structured": structured,
         "note": (
             "A missing term is a review cue, not permission to add it. Only supported "
             "candidate evidence may enter the resume."

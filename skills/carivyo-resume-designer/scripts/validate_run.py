@@ -27,6 +27,7 @@ CRITICAL_VALIDATION_FLAGS = (
     "export_ok",
     "page_count_ok",
     "text_extraction_ok",
+    "parser_consensus_ok",
     "links_ok",
     "identity_ok",
     "section_order_ok",
@@ -89,9 +90,14 @@ def validate(run_directory: Path) -> list[str]:
             confined(root, base.get("source_path", ""), f"base[{index}].source_path")
             confined(root, base.get("text_path", ""), f"base[{index}].text_path")
         for kind, value in result.get("artifacts", {}).items():
-            path = confined(root, value, f"artifact.{kind}")
-            if not path.is_file():
-                errors.append(f"artifact.{kind} does not exist")
+            values = value if isinstance(value, list) else [value]
+            if not values:
+                errors.append(f"artifact.{kind} is empty")
+            for index, item in enumerate(values):
+                label = f"artifact.{kind}[{index}]" if isinstance(value, list) else f"artifact.{kind}"
+                path = confined(root, item, label)
+                if not path.is_file():
+                    errors.append(f"{label} does not exist")
     except (TypeError, ValueError) as exc:
         errors.append(str(exc))
 
@@ -138,6 +144,22 @@ def validate(run_directory: Path) -> list[str]:
         errors.append("ATS analysis score must be between 0 and 100")
     if "No universal ATS score exists" not in ats_report.get("disclaimer", ""):
         errors.append("ATS analysis must carry the diagnostic-score disclaimer")
+    assessment = ats_report.get("assessment", {})
+    if assessment.get("legacy_score_deprecated") is not True:
+        errors.append("ATS v2 must deprecate the legacy aggregate score")
+    for perspective in ("compatibility", "evidence_alignment", "content_quality"):
+        if not isinstance(assessment.get(perspective), dict):
+            errors.append(f"ATS v2 perspective is missing: {perspective}")
+    if ats_report.get("jd_quality", {}).get("status") != "complete":
+        errors.append("job-specific ATS analysis requires a complete official JD")
+
+    render_pages = result.get("artifacts", {}).get("render_pages", [])
+    page_count = validation.get("page_count")
+    if not isinstance(render_pages, list) or len(render_pages) != page_count:
+        errors.append("every PDF page must have a bound visual render")
+    visual_details = validation.get("visual_details", {})
+    if visual_details.get("validated_page_count") != page_count:
+        errors.append("every PDF page must pass visual validation")
 
     provenance = result.get("provenance", {})
     profile = spec.get("profile_snapshot", {})

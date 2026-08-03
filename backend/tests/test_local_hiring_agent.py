@@ -41,7 +41,15 @@ def test_local_hiring_agent_is_evidence_bound_and_advisory(settings, monkeypatch
     result = agent.evaluate(
         run_id="run-1",
         claims=[{"id": "e1", "category": "experience", "text": "Built APIs."}],
-        requirements=[{"requirement": "Build APIs"}],
+        requirements=[
+            {
+                "requirement_id": "r1",
+                "requirement": "Build APIs",
+                "category": "technical_skill",
+                "priority": "responsibility",
+                "classification": "direct",
+            }
+        ],
         section_inventory=[
             {"id": "experience", "expected": True, "present": True, "claim_count": 1}
         ],
@@ -51,8 +59,14 @@ def test_local_hiring_agent_is_evidence_bound_and_advisory(settings, monkeypatch
     assert result["status"] == "complete"
     assert result["authoritative"] is False
     assert result["provider"] == "ollama"
-    assert result["score"] == 79.2
+    assert result["score"] > 0
     assert result["raw_model_score"] == 77
+    baselines = {
+        item["id"]: item["deterministic_baseline"]
+        for item in result["dimensions"]
+    }
+    assert len(set(baselines.values())) > 1
+    assert "independently" in result["score_basis"].casefold()
     assert all(
         set(dimension["evidence_ids"]) <= {"e1"}
         for dimension in result["dimensions"]
@@ -86,6 +100,9 @@ def test_resume_run_includes_complete_sections_and_local_decision_support(
     result = run["result"]
 
     assert result["validation"]["section_completeness_ok"] is True
+    assert result["validation"]["parser_consensus_ok"] is True
+    assert len(result["artifacts"]["render_pages"]) == result["validation"]["page_count"]
+    assert result["validation"]["visual_details"]["validated_page_count"] == result["validation"]["page_count"]
     expected = {
         item["id"] for item in result["section_inventory"] if item["expected"]
     }
@@ -95,11 +112,9 @@ def test_resume_run_includes_complete_sections_and_local_decision_support(
     assert expected == present
     assert {"summary", "experience", "projects", "skills", "education"} <= present
     assert result["hiring_evaluation"]["status"] == "complete"
-    expected_score = round(
-        0.75 * result["ats_analysis"]["overall_score"] + 0.25 * 77,
-        1,
-    )
-    assert result["hiring_evaluation"]["score"] == expected_score
+    dimensions = result["hiring_evaluation"]["dimensions"]
+    assert len(dimensions) == 5
+    assert len({item["deterministic_baseline"] for item in dimensions}) > 1
 
 
 def test_extraction_recognizes_and_preserves_extended_resume_sections():

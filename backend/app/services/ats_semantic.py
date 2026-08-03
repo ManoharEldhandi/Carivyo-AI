@@ -731,17 +731,18 @@ class ATSSemanticReviewService:
         for finding in response["findings"]:
             resume_verified = finding["resume_evidence"] in resume_text
             jd_verified = finding["jd_evidence"] in jd_text
+            if not resume_verified or not jd_verified:
+                raise SemanticResponseError(
+                    "unverified_evidence",
+                    "Every model finding must quote evidence present in both frozen inputs",
+                )
             findings.append(
                 {
                     **finding,
                     "confidence": float(finding["confidence"]),
                     "ai_assisted": True,
                     "evidence_verification": {
-                        "status": (
-                            "verified"
-                            if resume_verified and jd_verified
-                            else "unverified"
-                        ),
+                        "status": "verified",
                         "resume_evidence": resume_verified,
                         "jd_evidence": jd_verified,
                     },
@@ -754,8 +755,9 @@ class ATSSemanticReviewService:
             "review_version": self.REVIEW_VERSION,
             "authoritative": False,
             "disclaimer": (
-                "AI-assisted findings are advisory. The deterministic ATS score, "
-                "readiness, and approval remain authoritative and unchanged."
+                "AI-assisted findings are advisory. The deterministic ATS v2 "
+                "perspectives, validation gates, and approval state remain "
+                "authoritative and unchanged."
             ),
             "deterministic_reference": {
                 "analysis_id": analysis_record["id"],

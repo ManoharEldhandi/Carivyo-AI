@@ -31,17 +31,26 @@ export interface RuntimeSelection {
   provider: string;
   model: string;
   reasoning_effort: ReasoningEffort;
+  fully_local?: boolean;
+}
+
+export interface RuntimeExecution {
+  fully_local: boolean;
+  ready: boolean;
+  boundary?: string;
 }
 
 export interface RuntimeState {
   providers: RuntimeProvider[];
   mode: string;
   selection: RuntimeSelection;
+  execution?: RuntimeExecution;
 }
 
 export interface RuntimeSettingsResponse {
   providers: RuntimeProvider[];
   selection: RuntimeSelection;
+  execution?: RuntimeExecution;
 }
 
 export interface OnboardingQuestion {
@@ -345,6 +354,40 @@ export interface ATSAnalysisBindings {
   analysis_hash: string;
 }
 
+export interface ATSRequirementMatch {
+  id: string;
+  text: string;
+  priority: "required" | "preferred" | "responsibility";
+  category: string;
+  entities: string[];
+  match_status?: "direct" | "listed_only" | "transferable" | "unsupported";
+  best_field?: string | null;
+  matched_terms: string[];
+  matched_entities: string[];
+  demonstrated_entities: string[];
+  entity_coverage?: number | null;
+  lexical_coverage: number;
+}
+
+export interface ATSPerspective {
+  id: string;
+  label: string;
+  status: "strong" | "review" | "needs_focus" | "blocked" | "insufficient_data";
+  score: number | null;
+  coverage?: number;
+  confidence?: string;
+  applicable_checks?: number;
+  total_checks?: number;
+  critical_failures?: string[];
+  issues?: string[];
+  required_score?: number | null;
+  preferred_score?: number | null;
+  responsibility_score?: number | null;
+  counts?: Record<string, number>;
+  requirement_count?: number;
+  note?: string;
+}
+
 export interface ATSAnalysis {
   overall_score: number;
   parse_rate: number;
@@ -362,6 +405,41 @@ export interface ATSAnalysis {
     rule: string;
   };
   protected_trait_policy: string;
+  jd_quality?: {
+    version: string;
+    status: "complete" | "partial" | "insufficient";
+    confidence: "high" | "medium" | "low" | "unavailable";
+    word_count: number;
+    requirement_count: number;
+    required_count: number;
+    preferred_count: number;
+    responsibility_count: number;
+    recognized_entity_count: number;
+    recognized_entities: string[];
+    reason: string;
+    requirements: ATSRequirementMatch[];
+  };
+  structured_alignment?: {
+    version: string;
+    available: boolean;
+    score: number | null;
+    required_score: number | null;
+    preferred_score: number | null;
+    responsibility_score: number | null;
+    counts: Record<"direct" | "listed_only" | "transferable" | "unsupported", number>;
+    requirements: ATSRequirementMatch[];
+  };
+  assessment?: {
+    version: string;
+    status: ATSPerspective["status"];
+    confidence: string;
+    compatibility: ATSPerspective;
+    evidence_alignment: ATSPerspective;
+    content_quality: ATSPerspective;
+    legacy_overall_score: number;
+    legacy_score_deprecated: true;
+    explanation: string;
+  };
   report_summary: {
     readiness: "strong" | "review" | "needs_focus" | "blocked";
     status_counts: Record<ATSCheckStatus, number>;
@@ -585,6 +663,8 @@ export interface ResumeRun {
         evidence_ids: string[];
         requirement_indices: number[];
         rationale: string;
+        deterministic_baseline?: number;
+        deterministic_evidence?: string[];
       }>;
       strengths: string[];
       concerns: string[];

@@ -194,7 +194,7 @@ class RuntimeGateway:
                 detail="Ollama is installed but its local service is unavailable",
             )
 
-    def selection(self) -> Dict[str, str]:
+    def selection(self) -> Dict[str, Any]:
         catalog = self._codex_models()
         configured_default = next(
             (model.id for model in catalog if model.id == self.settings.codex_model),
@@ -210,14 +210,24 @@ class RuntimeGateway:
         default = (
             {
                 "provider": "ollama",
+                "model": local_default or configured_local or "",
+                "reasoning_effort": "none",
+                "fully_local": True,
+            }
+            if self.settings.fully_local_mode
+            else
+            {
+                "provider": "ollama",
                 "model": local_default,
                 "reasoning_effort": "none",
+                "fully_local": bool(self.settings.fully_local_mode),
             }
             if local_default
             else {
                 "provider": "codex",
                 "model": configured_default,
                 "reasoning_effort": "low",
+                "fully_local": False,
             }
         )
         if not self.database:
@@ -226,18 +236,38 @@ class RuntimeGateway:
             "SELECT value_json FROM settings WHERE key = 'runtime_selection'"
         )
         stored = json_loads(row["value_json"], {}) if row else {}
-        return {**default, **stored}
+        selection = {**default, **stored}
+        if selection.get("fully_local"):
+            selection["provider"] = "ollama"
+            selection["reasoning_effort"] = "none"
+            if local_default:
+                selection["model"] = local_default
+        return selection
 
     def configure(
         self,
         provider: str,
         model: str,
         reasoning_effort: str,
-    ) -> Dict[str, str]:
-        resolved_provider = self.resolve_provider(provider)
-        available = next(
-            item for item in self.discover() if item.id == resolved_provider
+        fully_local: bool = False,
+    ) -> Dict[str, Any]:
+        available_providers = {
+            item.id: item for item in self.discover() if item.available
+        }
+        resolved_provider = (
+            "ollama"
+            if fully_local and provider == "auto"
+            else provider
+            if provider != "auto"
+            else "ollama"
+            if "ollama" in available_providers
+            else "codex"
         )
+        if fully_local and resolved_provider != "ollama":
+            raise ValueError("Fully local mode requires an installed Ollama model")
+        available = available_providers.get(resolved_provider)
+        if not available:
+            raise ValueError(f"{resolved_provider} is not available")
         allowed_models = {item.id for item in available.models}
         if model not in allowed_models:
             raise ValueError(
@@ -255,6 +285,7 @@ class RuntimeGateway:
             "provider": resolved_provider,
             "model": model,
             "reasoning_effort": reasoning_effort,
+            "fully_local": fully_local,
         }
         if self.database:
             self.database.execute(
@@ -307,6 +338,17 @@ class RuntimeGateway:
 
     def resolve_provider(self, provider: str = "auto") -> str:
         available = {item.id: item for item in self.discover() if item.available}
+        fully_local = bool(self.selection().get("fully_local"))
+        if fully_local:
+            if "ollama" not in available:
+                raise RuntimeUnavailable(
+                    "Fully local mode is enabled, but Ollama has no available local model"
+                )
+            if provider not in {"auto", "ollama"}:
+                raise RuntimeUnavailable(
+                    "Fully local mode blocks provider-backed model execution"
+                )
+            return "ollama"
         selected = provider
         if provider == "auto":
             configured = self.selection()["provider"]
