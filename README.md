@@ -18,6 +18,20 @@ switch blocks provider-backed execution and refuses to fall back when Ollama
 is unavailable. Turning AI off keeps the
 deterministic extraction, filtering, matching, and ATS paths available.
 
+## Verified project scope
+
+- **2 model runtimes**: an authenticated Codex CLI session or an on-device
+  Ollama model, with explicit provider selection and no silent fallback in
+  fully local mode.
+- **27 deterministic ATS checks** bound to the exact resume and job-description
+  artifacts, with approval invalidated when the analyzed evidence changes.
+- **4 official hiring-system connectors** for Greenhouse, Lever, Ashby, and
+  SmartRecruiters, backed by **120 audited company boards** and direct-source
+  provenance.
+- Evidence-gated structured outputs, deterministic eligibility filters,
+  redacted logs, bounded verification, and layered prompt-injection defenses;
+  application handoff always remains user controlled.
+
 ## What works
 
 - Near-zero-configuration onboarding from PDF, DOCX, TeX, Markdown, or text.
