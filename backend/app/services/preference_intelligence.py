@@ -5,12 +5,28 @@ from typing import Any, Dict, Iterable, List, Optional
 
 
 LOCATION_ALIASES: Dict[str, tuple[str, ...]] = {
+    "Ahmedabad": ("ahmedabad",),
     "Bengaluru": ("bengaluru", "bangalore"),
+    "Bhubaneswar": ("bhubaneswar", "bhubaneshwar"),
+    "Chandigarh": ("chandigarh",),
     "Hyderabad": ("hyderabad",),
     "Chennai": ("chennai", "madras"),
+    "Coimbatore": ("coimbatore",),
+    "Goa": ("goa", "panaji"),
+    "Indore": ("indore",),
+    "Jaipur": ("jaipur",),
+    "Kochi": ("kochi", "cochin"),
+    "Kolkata": ("kolkata", "calcutta"),
+    "Lucknow": ("lucknow",),
+    "Mysuru": ("mysuru", "mysore"),
+    "Nagpur": ("nagpur",),
     "Pune": ("pune",),
     "Mumbai": ("mumbai", "bombay"),
     "Delhi NCR": ("delhi ncr", "new delhi", "delhi", "gurugram", "gurgaon", "noida"),
+    "Surat": ("surat",),
+    "Thiruvananthapuram": ("thiruvananthapuram", "trivandrum"),
+    "Vadodara": ("vadodara", "baroda"),
+    "Visakhapatnam": ("visakhapatnam", "vizag"),
     "Remote India": (
         "remote india",
         "india remote",
@@ -18,7 +34,17 @@ LOCATION_ALIASES: Dict[str, tuple[str, ...]] = {
         "remote in india",
         "work from home india",
     ),
-    "India": ("anywhere in india", "across india", "pan india", "india"),
+    # Selecting India is an intentional country-wide search option. It accepts
+    # official postings that list only a city, while selecting a named city
+    # remains exact and does not silently broaden to the rest of the country.
+    "India": (
+        "anywhere in india", "across india", "pan india", "india",
+        "ahmedabad", "bangalore", "bengaluru", "bhubaneswar", "bhubaneshwar",
+        "chandigarh", "chennai", "coimbatore", "delhi", "gurgaon", "gurugram",
+        "hyderabad", "indore", "jaipur", "kochi", "kolkata", "lucknow",
+        "mumbai", "mysore", "mysuru", "nagpur", "noida", "pune", "surat",
+        "thiruvananthapuram", "trivandrum", "vadodara", "visakhapatnam", "vizag",
+    ),
     "Singapore": ("singapore",),
     "Paris": ("paris",),
     "London": ("london",),
@@ -73,6 +99,16 @@ STRICT_LOCATION_PHRASES = (
     "strict location policy",
 )
 
+INDIA_WIDE_INTENT_PHRASES = (
+    "across india",
+    "all india",
+    "anywhere in india",
+    "india-wide",
+    "india wide",
+    "nationwide",
+    "pan india",
+)
+
 
 def unique(values: Iterable[str]) -> List[str]:
     result: List[str] = []
@@ -103,11 +139,7 @@ def parse_locations(text: str) -> List[str]:
         if positions:
             mentions.append((min(positions), canonical))
     if mentions:
-        # Remote India is more specific than India when both match the same phrase.
-        ordered = [value for _, value in sorted(mentions)]
-        if "Remote India" in ordered:
-            ordered = [value for value in ordered if value != "India"]
-        return unique(ordered)
+        return _specific_location_intent(lowered, [value for _, value in sorted(mentions)])
 
     cleaned = re.sub(
         r"\b(?:only|first|preferred?|prioriti[sz]e|locations?|cities|areas?|jobs?|roles?|in|from)\b",
@@ -132,9 +164,25 @@ def parse_known_locations(text: str) -> List[str]:
         ]
         if positions:
             mentions.append((min(positions), canonical))
-    ordered = [value for _, value in sorted(mentions)]
+    return _specific_location_intent(lowered, [value for _, value in sorted(mentions)])
+
+
+def _specific_location_intent(lowered: str, ordered: List[str]) -> List[str]:
+    """Keep a named-city query exact unless country-wide scope was explicit."""
+
+    # India has city aliases so an India-wide priority can include official
+    # listings that omit the country. Those aliases must not make a query such
+    # as "jobs in Hyderabad" silently mean the whole country, however.
+    named_city = any(
+        item not in {"India", "Remote India"}
+        for item in ordered
+    )
+    india_wide = any(phrase in lowered for phrase in INDIA_WIDE_INTENT_PHRASES)
+    if named_city and not india_wide:
+        ordered = [item for item in ordered if item != "India"]
+    # Remote India is more specific than India when both match the same phrase.
     if "Remote India" in ordered:
-        ordered = [value for value in ordered if value != "India"]
+        ordered = [item for item in ordered if item != "India"]
     return unique(ordered)
 
 

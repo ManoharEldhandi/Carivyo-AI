@@ -59,7 +59,7 @@ def strict_plan() -> dict:
     }
 
 
-def test_legacy_search_plan_shapes_gain_safe_ranked_defaults():
+def test_legacy_search_plan_shapes_gain_safe_strict_freshness_defaults():
     plan = normalize_search_plan(
         {
             "target_roles": ["Backend Engineer"],
@@ -75,7 +75,7 @@ def test_legacy_search_plan_shapes_gain_safe_ranked_defaults():
     assert plan["freshness_hours"] == 48
     assert plan["location_policy"] == "preference_order"
     assert plan["role_policy"] == "expanded_early_career"
-    assert plan["freshness_policy"] == "ranking"
+    assert plan["freshness_policy"] == "strict"
     assert plan["metadata_policy"] == "include_unknown"
 
 
@@ -252,7 +252,7 @@ def test_jobs_api_exposes_enforced_contract_and_rejection_coverage(client):
 
     assert payload["contract"]["location_policy"] == "preference_order"
     assert payload["contract"]["role_policy"] == "expanded_early_career"
-    assert payload["contract"]["freshness_policy"] == "ranking"
+    assert payload["contract"]["freshness_policy"] == "strict"
     assert payload["contract"]["freshness_hours"] == 48
     assert payload["contract"]["source_policy"] == "official_direct"
     assert payload["latest_run"]["status"] == "complete"

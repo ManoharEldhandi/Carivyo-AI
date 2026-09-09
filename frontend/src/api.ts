@@ -7,6 +7,7 @@ import type {
   Job,
   JobsPayload,
   OnboardingProfileReview,
+  SavedResumeMaster,
   OnboardingState,
   PreferenceSettings,
   PreferenceUpdateResponse,
@@ -20,6 +21,7 @@ import type {
   RuntimeSettingsResponse,
   RuntimeState,
   SearchRun,
+  SearchSchedule,
   UsagePayload
 } from "./types";
 
@@ -150,6 +152,13 @@ export const api = {
       body: form
     });
   },
+  savedResumeMasters: () =>
+    request<{ masters: SavedResumeMaster[] }>("/api/onboarding/saved-masters"),
+  useSavedResumeMaster: (artifactId: string) =>
+    request<OnboardingState>(
+      `/api/onboarding/saved-masters/${encodeURIComponent(artifactId)}`,
+      { method: "POST", body: "{}" }
+    ),
   answerOnboarding: (sessionId: string, questionId: string, answer: string) =>
     request<{
       status: string;
@@ -184,6 +193,12 @@ export const api = {
       body: JSON.stringify({ temporary_instruction: temporaryInstruction || null })
     }),
   searchRun: (id: string) => request<SearchRun>(`/api/search-runs/${id}`),
+  searchSchedule: () => request<SearchSchedule>("/api/search-schedule"),
+  updateSearchSchedule: (schedule: Pick<SearchSchedule, "enabled" | "cadence" | "time" | "weekday" | "notify">) =>
+    request<SearchSchedule>("/api/search-schedule", {
+      method: "PUT",
+      body: JSON.stringify(schedule)
+    }),
   jobs: () => request<JobsPayload>("/api/jobs"),
   job: (id: string) => request<Job>(`/api/jobs/${id}`),
   verifyJob: (id: string) =>
@@ -193,10 +208,20 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ action, reason })
     }),
-  createResume: (jobId: string, customInstructions: string) =>
+  createResume: (
+    jobId: string,
+    customInstructions: string,
+    template?: "ai" | "software" | "balanced",
+    design?: {
+      model?: string;
+      reasoning_effort?: import("./types").ReasoningEffort;
+      check_public_github?: boolean;
+      confirmed_public_github_access?: boolean;
+    }
+  ) =>
     request<ResumeRun>(`/api/jobs/${jobId}/resume-runs`, {
       method: "POST",
-      body: JSON.stringify({ custom_instructions: customInstructions })
+      body: JSON.stringify({ custom_instructions: customInstructions, template, ...design })
     }),
   latestResumeRun: (jobId: string) =>
     request<{ run: ResumeRun | null }>(`/api/jobs/${jobId}/resume-runs/latest`),
@@ -342,5 +367,10 @@ export const api = {
   deleteData: () =>
     request<{ deleted: true; deleted_backups: number }>("/api/data", {
       method: "DELETE"
-    })
+    }),
+  resetDataKeepMasters: () =>
+    request<{ reset: true; preserved_masters: number; removed_artifact_groups: number }>(
+      "/api/data/reset-keep-masters",
+      { method: "DELETE" }
+    )
 };

@@ -37,7 +37,8 @@ def test_tex_source_round_trip_rebuilds_exact_current_variant(client):
     source = source_response.json()
     assert source["language"] == "latex"
     assert source["editable"] is True
-    assert "\\documentclass[11pt,a4paper]" in source["source"]
+    assert "\\documentclass[a4paper,10pt]" in source["source"]
+    assert "\\IfFileExists{carlito.sty}" in source["source"]
     assert "ResumeNavy" in source["source"]
 
     previous_pdf = Path(run["result"]["artifacts"]["pdf"])

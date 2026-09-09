@@ -159,7 +159,10 @@ def normalize_search_plan(value: Any) -> Dict[str, Any]:
         ]
     plan["location_policy"] = plan.get("location_policy") or "preference_order"
     plan["role_policy"] = plan.get("role_policy") or "expanded_early_career"
-    plan["freshness_policy"] = plan.get("freshness_policy") or "ranking"
+    # A saved freshness choice is a boundary, not a ranking hint. This is
+    # deliberately an unconditional migration at the read boundary: legacy
+    # plans persisted with ``ranking`` must not keep surfacing stale listings.
+    plan["freshness_policy"] = "strict"
     plan["metadata_policy"] = plan.get("metadata_policy") or "include_unknown"
     plan["seniority_policy"] = plan.get("seniority_policy") or "early_career"
     plan["source_policy"] = plan.get("source_policy") or "official_direct"
@@ -259,11 +262,12 @@ class SearchPlanService:
             "salary_min": salary_min,
             "salary_currency": salary_currency,
             "salary_period": salary_period,
-            # Ordered preferences affect ranking. They are not exclusions unless a
-            # one-time search explicitly asks for strict geography.
+            # Locations are ordered preferences so the candidate can deliberately
+            # search a city, Remote India, or India-wide. Freshness is different:
+            # if the candidate chooses 24/48/72 hours, older posts are excluded.
             "location_policy": "preference_order",
             "role_policy": "expanded_early_career",
-            "freshness_policy": "ranking",
+            "freshness_policy": "strict",
             "metadata_policy": "include_unknown",
             "seniority_policy": "early_career",
             "source_policy": preferences.get("source_policy", "official_direct"),

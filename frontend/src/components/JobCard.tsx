@@ -34,7 +34,7 @@ export function JobCard({ job, onSelect, onFeedback, busyAction }: Props) {
             </p>
           </div>
           <span className={`fit-label fit-label--${job.tier}`}>
-            {job.tier} fit · {Math.round(job.score)}
+            {job.tier} fit
           </span>
         </header>
 
@@ -50,7 +50,7 @@ export function JobCard({ job, onSelect, onFeedback, busyAction }: Props) {
 
         {job.reasons[0] ? (
           <p className="job-signal">
-            <strong>Why it fits</strong>
+            <strong>Why this job</strong>
             <span>{job.reasons[0].text}</span>
           </p>
         ) : null}

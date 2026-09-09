@@ -8,9 +8,9 @@ workflow.
 
 The product is a React/TypeScript SPA backed by a FastAPI modular monolith and
 SQLite. It runs on loopback, keeps personal artifacts on the local machine, and
-can use an existing Codex CLI session or an on-device Ollama model. When a
-local Ollama model is installed, new profiles default to it for chat and
-Carivyo's advisory hiring-manager review. Ollama cloud pointers are excluded
+can use an existing Codex CLI session or an on-device Ollama model. Codex is
+the default assisted runtime; Ollama is an explicit on-device alternative for
+chat and Carivyo's advisory hiring-manager review. Ollama cloud pointers are excluded
 from every path labelled local. With Codex, compact task context is processed by the selected provider through
 the installed CLI while Carivyo's records stay local. With Ollama, both stored
 records and model inference remain on the device. The explicit Fully local
@@ -20,9 +20,9 @@ deterministic extraction, filtering, matching, and ATS paths available.
 
 ## Verified project scope
 
-- **2 model runtimes**: an authenticated Codex CLI session or an on-device
-  Ollama model, with explicit provider selection and no silent fallback in
-  fully local mode.
+- **2 model runtimes**: an authenticated Codex CLI session (the default) or an
+  on-device Ollama model, with explicit provider selection and no silent
+  fallback in fully local mode.
 - **27 deterministic ATS checks** bound to the exact resume and job-description
   artifacts, with approval invalidated when the analyzed evidence changes.
 - **4 official hiring-system connectors** for Greenhouse, Lever, Ashby, and
@@ -41,9 +41,24 @@ deterministic extraction, filtering, matching, and ATS paths available.
   company application-domain validation, and direct-application provenance.
 - Tri-state job eligibility: explicit exclusions, clearly incompatible
   geography, senior scope, and missing official links remain hard gates;
-  missing salary/date/work-mode/employment metadata stays eligible with visible
-  uncertainty. Locations and freshness are ranked preferences by default, while
-  one-time instructions can still enforce strict scope.
+  missing salary/work-mode/employment metadata stays eligible with visible
+  uncertainty. A saved freshness limit is always strict: choosing 24, 48, or
+  72 hours excludes older and date-unverified listings. Locations retain their
+  deliberate priority order, including an explicit India-wide option for the
+  supported official-source cities.
+- A focused desktop queue that puts current, strong/good priority matches first;
+  older or lower-confidence official listings are available through an explicit
+  broader-results control instead of competing with the next decision.
+- Opt-in daily or weekly searches while the local service is open, with a
+  visible next run and optional browser notification. A missed search runs once
+  on the next local start; Carivyo does not install a hidden background agent.
+- Feedback-aware ranking learns a small, explainable preference signal from
+  Keep, Hide, and Apply actions. Every role also has a "Why this job?" view
+  that separates proven evidence, priority alignment, unknowns, and real gaps.
+- A local “Start fresh” control clears search, application, generated-resume,
+  ATS, schedule, chat, profile, and backup data while retaining imported resume
+  masters for a fresh evidence review. Full deletion remains available through
+  the local API for users who do not want to retain a master.
 - Resume-supported role expansion covers software/backend, AI/LLM, applied ML,
   and company-specific early-career titles such as AMTS, engineering analyst,
   programmer analyst, graduate engineer trainee, and applications developer.
@@ -61,6 +76,19 @@ deterministic extraction, filtering, matching, and ATS paths available.
   approval is blocked if the analyzed artifacts change. Resume Studio restores
   the latest saved job-specific run after closing or refreshing, while “New
   version” starts a separate immutable run.
+- Three frozen, evidence-safe one-page resume templates—Balanced, AI
+  engineering, and Software engineering—can be selected before tailoring.
+  The chosen template is recorded inside the immutable resume run and checked
+  before export or approval.
+- Resume Studio offers the reviewed Codex model catalog and only the reasoning
+  efforts supported by the selected model. Its per-run default is GPT-5.6 Terra
+  at Extra high reasoning; this does not change the app-wide runtime setting.
+  Codex creates a visible JD-and-evidence advisory plan, while deterministic
+  evidence selection writes the actual resume.
+- Optional GitHub verification requires a second explicit consent and examines
+  only direct public repository URLs already present in approved evidence. It
+  can prioritize an existing claim, but never adds a repository-derived skill,
+  metric, responsibility, or new bullet automatically.
 - Independent `pypdf` and Poppler extraction must agree, and every rendered PDF
   page passes machine visual validation before approval.
   Every recognized source section is retained as a blocking generation gate;
@@ -101,25 +129,18 @@ default and is excluded from Git. Set `CARIVYO_NO_OPEN=1` when browser launch is
 not wanted. Shutdown terminates the complete frontend/backend process trees;
 startup refuses occupied ports instead of silently serving an older bundle.
 
-To exercise the production frontend bundle locally, use two terminals after
-`make install`:
+To build and run the laptop release (the production frontend assets served by
+one loopback-only local process), use:
 
 ```bash
-# terminal 1
-export CARIVYO_BOOTSTRAP_TOKEN="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
-echo "Private launch token: $CARIVYO_BOOTSTRAP_TOKEN"
-.venv/bin/uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8420
-
-# terminal 2
-cd frontend
-npm run build
-npm run preview -- --host 127.0.0.1 --port 4173
+make local-release
 ```
 
-Open `http://127.0.0.1:4173/#bootstrap=<the token from terminal 1>`. This is a
-local website deployment; Carivyo rejects non-loopback hosts and clients. A
-hosted service requires the separate multi-user security controls listed in
-`docs/readiness.md`.
+The launcher prints a private `http://127.0.0.1:8420/#bootstrap=…` URL and
+opens it unless `--no-browser` is passed to `carivyo start`. This is a local
+laptop release, not a hosted deployment or a signed native installer; Carivyo
+rejects non-loopback hosts and clients. A hosted service requires the separate
+multi-user controls listed in `docs/readiness.md`.
 
 `make install` chooses Python 3.13, 3.12, or 3.11 when available and uses the
 public npm registry and PyPI. Override the interpreter or Python index when
@@ -192,6 +213,11 @@ file/shell primitives and unsupported content are rejected. Imported PDFs and
 DOCX files use the explicit ATS-safe Build path because arbitrary source-layout
 reconstruction is not claimed.
 
+Generated TeX uses the same Carlito-first, Helvetica-fallback sans-serif
+strategy as the retained master resumes. The master resume's direct source
+language is retained: an optional model can identify priorities and gaps, but
+cannot rewrite evidence or make a factual assertion eligible for export.
+
 Read the [problem definition](problem.md), [system architecture](system.md),
 and [architecture decisions](docs/architecture-decisions.md) for the complete
 design. Security reports should follow [SECURITY.md](SECURITY.md).
@@ -200,15 +226,16 @@ Third-party attributions are recorded in
 
 ## Project status
 
-Carivyo is a tested local single-user website, not a hosted multi-user service
-and not yet a production-readiness claim. Official source coverage currently
-includes 120 curated company boards across Greenhouse, Lever, Ashby,
-SmartRecruiters, Salesforce Careers, and Goldman Sachs Higher. The catalog is
-broad rather than exhaustive, and a SmartRecruiters board is explicitly
-reported as partial whenever its bounded detail-verification budget cannot
-cover every listing. Broader connectors, application-managed encryption,
-encrypted backups, distribution hardening, and controlled adapters for
-additional CLIs remain future work.
+Carivyo is Git-ready for a private, laptop-first release from this repository:
+`make local-release` builds the frontend and starts one authenticated loopback
+service. It is not a hosted multi-user product or a signed native installer.
+Official source coverage currently includes 120 curated company boards across
+Greenhouse, Lever, Ashby, SmartRecruiters, Salesforce Careers, and Goldman
+Sachs Higher. The catalog is broad rather than exhaustive, and a
+SmartRecruiters board is explicitly reported as partial whenever its bounded
+detail-verification budget cannot cover every listing. Broader connectors,
+application-managed encryption, encrypted backups, signed distribution, and
+controlled adapters for additional CLIs remain future work.
 
 ## Ownership and license
 

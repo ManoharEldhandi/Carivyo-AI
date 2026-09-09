@@ -5,13 +5,16 @@ from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field, HttpUrl, field_validator, model_validator
 
 
+ReasoningEffort = Literal["none", "low", "medium", "high", "xhigh", "max", "ultra"]
+
+
 class RuntimeModel(BaseModel):
     id: str
     name: str
     profile: Literal["efficient", "balanced", "quality", "local"]
     recommended: bool = False
     detail: Optional[str] = None
-    reasoning_efforts: List[Literal["none", "low", "medium", "high"]] = Field(
+    reasoning_efforts: List[ReasoningEffort] = Field(
         default_factory=lambda: ["low"]
     )
     use_cases: List[str] = Field(default_factory=list)
@@ -35,7 +38,7 @@ class RuntimeProvider(BaseModel):
 class RuntimeSettingsRequest(BaseModel):
     provider: str = Field(min_length=1, max_length=50)
     model: str = Field(min_length=1, max_length=160)
-    reasoning_effort: Literal["none", "low", "medium", "high"] = "low"
+    reasoning_effort: ReasoningEffort = "low"
     fully_local: bool = False
 
 
@@ -217,6 +220,14 @@ class SearchRunRequest(BaseModel):
         return normalized
 
 
+class SearchScheduleRequest(BaseModel):
+    enabled: bool = False
+    cadence: Literal["daily", "weekly"] = "daily"
+    time: str = Field(default="09:00", pattern=r"^\d{2}:\d{2}$")
+    weekday: int = Field(default=0, ge=0, le=6)
+    notify: bool = False
+
+
 class JobFeedbackRequest(BaseModel):
     action: Literal["save", "hide", "keep", "more_like_this"]
     reason: Optional[str] = Field(default=None, max_length=1000)
@@ -358,6 +369,18 @@ class CandidateProfileUpdateRequest(BaseModel):
 
 class ResumeRunRequest(BaseModel):
     custom_instructions: str = Field(default="", max_length=5000)
+    template: Optional[Literal["ai", "software", "balanced"]] = None
+    provider: Literal["codex"] = "codex"
+    model: Optional[str] = Field(default=None, max_length=160)
+    reasoning_effort: Optional[ReasoningEffort] = None
+    check_public_github: bool = False
+    confirmed_public_github_access: bool = False
+
+    @model_validator(mode="after")
+    def require_github_confirmation(self) -> "ResumeRunRequest":
+        if self.check_public_github and not self.confirmed_public_github_access:
+            raise ValueError("Confirm public GitHub access before checking linked repositories")
+        return self
 
 
 class ResumeRunMessageRequest(BaseModel):
@@ -367,7 +390,7 @@ class ResumeRunMessageRequest(BaseModel):
 class ATSSemanticReviewRequest(BaseModel):
     provider: str = Field(default="auto", min_length=1, max_length=50)
     model: Optional[str] = Field(default=None, max_length=160)
-    reasoning_effort: Optional[Literal["none", "low", "medium", "high"]] = None
+    reasoning_effort: Optional[ReasoningEffort] = None
     confirmed_full_document_processing: bool = False
 
 

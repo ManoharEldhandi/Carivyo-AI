@@ -44,6 +44,7 @@ from app.schemas import (
     ResumeRunRequest,
     ResumeSourceUpdateRequest,
     RuntimeSettingsRequest,
+    SearchScheduleRequest,
     SearchRunRequest,
 )
 from app.security import LocalRateLimiter, SessionSecurity
@@ -60,6 +61,7 @@ from app.services.profile import ProfileService
 from app.services.resume import ResumeRunBlocked, ResumeService
 from app.services.runtime import RuntimeGateway
 from app.services.search import SearchService
+from app.services.schedule import SearchScheduleService
 from app.services.search_plan import SearchPlanService
 
 
@@ -76,6 +78,7 @@ class Container:
     plans: SearchPlanService
     matching: MatchingService
     search: SearchService
+    schedule: SearchScheduleService
     runtime: RuntimeGateway
     hiring_agent: LocalHiringAgent
     ats_semantic: ATSSemanticReviewService
@@ -168,8 +171,9 @@ def build_container(settings: Settings) -> Container:
     onboarding = OnboardingService(settings, database, vault)
     preferences = PreferenceService(database)
     plans = SearchPlanService(database, profiles)
-    matching = MatchingService(profiles)
+    matching = MatchingService(profiles, database)
     search = SearchService(settings, database, vault, profiles, plans, matching)
+    schedule = SearchScheduleService(database, profiles, search)
     runtime = RuntimeGateway(settings, database)
     hiring_agent = LocalHiringAgent(
         database,
@@ -185,7 +189,9 @@ def build_container(settings: Settings) -> Container:
         runtime,
         settings.max_chat_input_tokens,
     )
-    resumes = ResumeService(database, vault, profiles, search, hiring_agent)
+    resumes = ResumeService(
+        database, vault, profiles, search, hiring_agent, runtime=runtime
+    )
     enhancv = EnhancvATSService(settings, database, vault)
     applications = ApplicationService(database, search, resumes)
     backup = BackupService(settings, database)
@@ -201,6 +207,7 @@ def build_container(settings: Settings) -> Container:
         plans=plans,
         matching=matching,
         search=search,
+        schedule=schedule,
         runtime=runtime,
         hiring_agent=hiring_agent,
         ats_semantic=ats_semantic,
@@ -230,6 +237,23 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         # them from the immutable PDF/JD byte hashes recorded at consent time.
         for report_id in container.enhancv.pending():
             asyncio.create_task(asyncio.to_thread(container.enhancv.execute, report_id))
+
+        async def scheduled_search_loop() -> None:
+            while True:
+                await container.schedule.tick()
+                await asyncio.sleep(max(5, container.settings.scheduler_poll_seconds))
+
+        application.state.schedule_task = asyncio.create_task(scheduled_search_loop())
+
+    @application.on_event("shutdown")
+    async def stop_scheduled_search_loop() -> None:
+        task = getattr(application.state, "schedule_task", None)
+        if task:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
     application.add_middleware(
         CORSMiddleware,
         allow_origins=settings.allowed_origins,
@@ -372,6 +396,22 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     async def onboarding_import(resume: UploadFile = File(...)) -> Dict[str, Any]:
         try:
             return await container.onboarding.import_resume(resume)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @application.get(
+        "/api/onboarding/saved-masters", dependencies=[Depends(require_session)]
+    )
+    async def onboarding_saved_masters() -> Dict[str, Any]:
+        return {"masters": container.onboarding.saved_masters()}
+
+    @application.post(
+        "/api/onboarding/saved-masters/{artifact_id}",
+        dependencies=[Depends(require_session)],
+    )
+    async def onboarding_use_saved_master(artifact_id: str) -> Dict[str, Any]:
+        try:
+            return container.onboarding.begin_from_saved_master(artifact_id)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -555,7 +595,10 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         background_tasks: BackgroundTasks, payload: SearchRunRequest
     ) -> Dict[str, Any]:
         try:
-            run = container.search.create_run(payload.temporary_instruction)
+            run = container.search.create_run(
+                payload.temporary_instruction,
+                reason=payload.reason,
+            )
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         background_tasks.add_task(container.search.run, run["id"])
@@ -593,7 +636,21 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             "locations": _count_by(results, "location"),
             "contract": container.search.search_contract() if has_profile else None,
             "latest_run": container.search.latest_coverage(),
+            "schedule": container.schedule.state(),
         }
+
+    @application.get("/api/search-schedule", dependencies=[Depends(require_session)])
+    async def search_schedule() -> Dict[str, Any]:
+        return container.schedule.state()
+
+    @application.put("/api/search-schedule", dependencies=[Depends(require_session)])
+    async def update_search_schedule(
+        payload: SearchScheduleRequest,
+    ) -> Dict[str, Any]:
+        try:
+            return container.schedule.configure(payload.model_dump())
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     @application.get("/api/jobs/{job_id}", dependencies=[Depends(require_session)])
     async def job(job_id: str) -> Dict[str, Any]:
@@ -614,6 +671,11 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         return await container.resumes.create(
             job_id,
             payload.custom_instructions,
+            payload.template,
+            payload.model,
+            payload.reasoning_effort,
+            payload.check_public_github,
+            payload.confirmed_public_github_access,
         )
 
     @application.get(
@@ -912,6 +974,13 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         deleted = await asyncio.to_thread(_delete_user_data, container)
         return {"deleted": True, **deleted}
 
+    @application.delete(
+        "/api/data/reset-keep-masters", dependencies=[Depends(require_session)]
+    )
+    async def reset_data_keep_masters() -> Dict[str, Any]:
+        reset = await asyncio.to_thread(_reset_user_data_keep_masters, container)
+        return {"reset": True, **reset}
+
     frontend_dist = settings.project_root / "frontend" / "dist"
     if frontend_dist.exists():
         application.mount(
@@ -928,6 +997,84 @@ def _count_by(items: list[Dict[str, Any]], key: str) -> Dict[str, int]:
         value = str(item.get(key) or "Unspecified")
         counts[value] = counts.get(value, 0) + 1
     return counts
+
+
+def _reset_user_data_keep_masters(container: Container) -> Dict[str, int]:
+    """Start a local workspace over without discarding imported resume masters.
+
+    This is intentionally distinct from the full privacy-delete endpoint. The
+    preserved source files and pending evidence require an explicit "Use saved
+    master" action during the next onboarding; no profile or preference becomes
+    active automatically.
+    """
+
+    masters = container.database.fetch_all(
+        "SELECT id, source_path, text_path FROM source_artifacts"
+    )
+    preserved_import_dirs: set[Path] = set()
+    for master in masters:
+        for key in ("source_path", "text_path"):
+            path = Path(master[key]).resolve()
+            try:
+                container.vault.confined(path)
+            except ValueError:
+                continue
+            preserved_import_dirs.add(path.parent)
+
+    ordered_tables = [
+        "applications",
+        "ats_semantic_reviews",
+        "ats_analyses",
+        "resume_runs",
+        "agent_runs",
+        "memory_items",
+        "messages",
+        "pending_preference_changes",
+        "conversations",
+        "activity_events",
+        "match_results",
+        "job_verifications",
+        "job_source_observations",
+        "jobs",
+        "search_runs",
+        "search_plans",
+        "preferences",
+        "profile_snapshots",
+        "onboarding_sessions",
+        "settings",
+    ]
+    with container.database.transaction() as connection:
+        connection.execute("PRAGMA secure_delete = ON")
+        for table in ordered_tables:
+            connection.execute(f"DELETE FROM {table}")
+        # The only retained personal records are the explicit master-resume
+        # sources. They return to pending status so a new onboarding review is
+        # required before any claim can drive matching or resume tailoring.
+        connection.execute(
+            "UPDATE evidence_claims SET approval = 'pending', conflict_json = NULL"
+        )
+
+    removed_artifacts = 0
+    imports_dir = container.settings.artifacts_dir / "imports"
+    for child in list(container.settings.artifacts_dir.iterdir()):
+        if child == imports_dir:
+            for imported in list(child.iterdir()):
+                if imported.resolve() not in preserved_import_dirs:
+                    container.vault.secure_delete(imported)
+                    removed_artifacts += 1
+            continue
+        container.vault.secure_delete(child)
+        removed_artifacts += 1
+
+    for child in list(container.settings.backups_dir.iterdir()):
+        container.vault.secure_delete(child)
+    for child in list(container.settings.runtime_dir.iterdir()):
+        container.vault.secure_delete(child)
+    container.database.compact_after_delete()
+    return {
+        "preserved_masters": len(masters),
+        "removed_artifact_groups": removed_artifacts,
+    }
 
 
 def _delete_user_data(container: Container) -> Dict[str, int]:

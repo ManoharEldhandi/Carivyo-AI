@@ -1,13 +1,13 @@
 {
-  "catalog_version": "2026-07-18",
+  "catalog_version": "2026-09-09",
   "models": [
     {
       "id": "gpt-5.6-terra",
       "name": "GPT-5.6 Terra",
       "profile": "balanced",
       "recommended": true,
-      "detail": "Balanced default for accurate, token-conscious profile parsing, ranking explanations, chat, and resume review.",
-      "reasoning_efforts": ["low", "medium", "high"],
+      "detail": "Balanced default for resume planning, profile parsing, ranking explanations, and chat. Resume Studio starts here at extra high reasoning.",
+      "reasoning_efforts": ["low", "medium", "high", "xhigh", "max"],
       "use_cases": ["profile", "preferences", "ranking", "chat", "resume_review"]
     },
     {
@@ -16,7 +16,7 @@
       "profile": "efficient",
       "recommended": false,
       "detail": "Cost-sensitive option for short extraction, routing, classification, and concise chat.",
-      "reasoning_efforts": ["low", "medium", "high"],
+      "reasoning_efforts": ["low", "medium", "high", "xhigh", "max"],
       "use_cases": ["extraction", "routing", "classification", "chat"]
     },
     {
@@ -25,8 +25,26 @@
       "profile": "quality",
       "recommended": false,
       "detail": "Quality-first option for difficult resume decisions and ambiguous evidence review.",
-      "reasoning_efforts": ["none", "low", "medium", "high"],
+      "reasoning_efforts": ["none", "low", "medium", "high", "xhigh", "max", "ultra"],
       "use_cases": ["complex_reasoning", "resume_review", "architecture"]
+    },
+    {
+      "id": "gpt-6-astra",
+      "name": "GPT-6 Astra",
+      "profile": "quality",
+      "recommended": false,
+      "detail": "Highest-capability Codex option for difficult evidence planning. Availability depends on the signed-in Codex account.",
+      "reasoning_efforts": ["low", "medium", "high", "xhigh", "max", "ultra"],
+      "use_cases": ["complex_reasoning", "resume_review", "architecture"]
+    },
+    {
+      "id": "gpt-5.5",
+      "name": "GPT-5.5",
+      "profile": "quality",
+      "recommended": false,
+      "detail": "A reviewed Codex option for careful resume evidence planning when it is enabled for the signed-in account.",
+      "reasoning_efforts": ["low", "medium", "high", "xhigh"],
+      "use_cases": ["complex_reasoning", "resume_review"]
     }
   ]
 }

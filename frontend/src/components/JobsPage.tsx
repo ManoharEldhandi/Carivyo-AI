@@ -9,11 +9,11 @@ import {
 import {
   AlertTriangle,
   ArrowUpRight,
+  CalendarClock,
   CheckCircle2,
   Clock3,
   ExternalLink,
   FilePenLine,
-  ListOrdered,
   LoaderCircle,
   MapPin,
   RefreshCw,
@@ -27,10 +27,10 @@ import { api } from "../api";
 import { useModalDialog } from "../hooks/useModalDialog";
 import type {
   Job,
-  JobsPayload,
   LatestSearchRun,
   SearchContract,
-  SearchRun
+  SearchRun,
+  SearchSchedule
 } from "../types";
 import {
   JobCard,
@@ -75,6 +75,7 @@ export function JobsPage({
   const [jobs, setJobs] = useState<Job[]>([]);
   const [contract, setContract] = useState<SearchContract | null>(null);
   const [latestRun, setLatestRun] = useState<LatestSearchRun | null>(null);
+  const [schedule, setSchedule] = useState<SearchSchedule | null>(null);
   const [searchRun, setSearchRun] = useState<SearchRun | null>(null);
   const [selected, setSelected] = useState<Job | null>(null);
   const [resumeJob, setResumeJob] = useState<Job | null>(null);
@@ -87,8 +88,10 @@ export function JobsPage({
   const [showOneTimeSearch, setShowOneTimeSearch] = useState(false);
   const [oneTimeInstruction, setOneTimeInstruction] = useState("");
   const [visibleLimit, setVisibleLimit] = useState(RESULTS_PAGE_SIZE);
+  const [showBroaderResults, setShowBroaderResults] = useState(false);
   const detailRef = useRef<HTMLElement>(null);
   const detailCloseRef = useRef<HTMLButtonElement>(null);
+  const notifiedScheduleRun = useRef<string | null>(null);
 
   function closeDetails() {
     setSelected(null);
@@ -103,6 +106,7 @@ export function JobsPage({
       setJobs(response.jobs);
       setContract(response.contract);
       setLatestRun(response.latest_run);
+      setSchedule(response.schedule ?? null);
       setError("");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Jobs could not be loaded.");
@@ -114,6 +118,21 @@ export function JobsPage({
   useEffect(() => {
     void loadJobs();
   }, [loadJobs]);
+
+  useEffect(() => {
+    if (
+      !schedule?.notify ||
+      !schedule.last_run_id ||
+      schedule.last_status !== "complete" ||
+      notifiedScheduleRun.current === schedule.last_run_id ||
+      typeof Notification === "undefined" ||
+      Notification.permission !== "granted"
+    ) return;
+    notifiedScheduleRun.current = schedule.last_run_id;
+    new Notification("Carivyo search complete", {
+      body: "Your saved priorities have been checked against the latest official listings."
+    });
+  }, [schedule]);
 
   useEffect(() => {
     if (
@@ -170,9 +189,23 @@ export function JobsPage({
 
   useLayoutEffect(() => {
     setVisibleLimit(RESULTS_PAGE_SIZE);
+    setShowBroaderResults(false);
   }, [jobs, query, savedOnly]);
 
-  const pagedVisible = visible.slice(0, visibleLimit);
+  // The first screen is intentionally a decision queue, not an exhaustive
+  // archive. Older, uncertain, or lower-confidence listings stay available
+  // without competing with a current role that meets the saved priorities.
+  const focusedJobs = useMemo(
+    () => visible.filter(isFocusedJob),
+    [visible]
+  );
+  const hasActiveFilter = Boolean(query.trim()) || savedOnly;
+  const fallbackToAllResults = !hasActiveFilter && focusedJobs.length === 0;
+  const displayedResults = hasActiveFilter || showBroaderResults || fallbackToAllResults
+    ? visible
+    : focusedJobs;
+  const broaderCount = Math.max(0, visible.length - focusedJobs.length);
+  const pagedVisible = displayedResults.slice(0, visibleLimit);
 
   const grouped = groupOrder
     .map((group) => ({
@@ -253,6 +286,15 @@ export function JobsPage({
   function openDetails(job: Job) {
     setSelected(job);
     onSelectJob(job);
+    // The queue intentionally stays compact. Fetch the full evidence analysis
+    // only when the person explicitly opens the decision view.
+    void api.job(job.id)
+      .then((detail) => {
+        setSelected((current) => current?.id === job.id ? detail : current);
+      })
+      .catch(() => {
+        // The compact queue remains useful if a detail refresh is unavailable.
+      });
   }
 
   function askAboutSelected() {
@@ -284,11 +326,11 @@ export function JobsPage({
 
   return (
     <>
-      <section className="jobs-header" aria-labelledby="jobs-title">
+      <section className="jobs-header jobs-header--compact" aria-labelledby="jobs-title">
         <div>
-          <p className="eyebrow">Opportunity intelligence</p>
+          <p className="eyebrow">Your job queue</p>
           <h1 id="jobs-title">Jobs</h1>
-          <p>Live roles, verified at the source and ranked around your evidence.</p>
+          <p>Best roles first — official listings ranked by your priorities and evidence.</p>
         </div>
         <div className="jobs-header__actions">
           <button
@@ -338,41 +380,27 @@ export function JobsPage({
         </form>
       ) : null}
 
-      <section className="search-contract" aria-labelledby="search-contract-title">
+      <section className="search-contract search-contract--compact" aria-labelledby="search-contract-title">
         <div className="search-contract__title">
           <ShieldCheck aria-hidden="true" />
           <div>
-            <span id="search-contract-title">
+            <strong id="search-contract-title">
               {contract?.temporary_override ? "One-time search" : "Your search"}
-            </span>
+            </strong>
+            <span>{(contract?.target_roles ?? []).join(" · ") || "No roles configured"} in {(contract?.locations ?? []).join(" · ") || "your selected locations"}</span>
           </div>
           <button className="button button--quiet" type="button" onClick={onEditPriorities}>
             <Settings2 aria-hidden="true" /> Edit priorities
           </button>
         </div>
-        <div className="contract-group">
-          <ListOrdered aria-hidden="true" />
-          <span className="contract-group__label">Roles</span>
-          <ol>
-            {(contract?.target_roles ?? []).map((role) => <li key={role}>{role}</li>)}
-            {!contract?.target_roles?.length ? <li>Not configured</li> : null}
-          </ol>
-        </div>
-        <div className="contract-group">
-          <MapPin aria-hidden="true" />
-          <span className="contract-group__label">Locations</span>
-          <ol>
-            {(contract?.locations ?? []).map((location) => <li key={location}>{location}</li>)}
-            {!contract?.locations?.length ? <li>Not configured</li> : null}
-          </ol>
-        </div>
         <div className="contract-rules">
           <span><Clock3 aria-hidden="true" /> {contract?.freshness_policy === "strict" ? `Only ≤${contract?.freshness_hours ?? 48}h` : `Freshness ranked · target ≤${contract?.freshness_hours ?? 48}h`}</span>
-          <span><ShieldCheck aria-hidden="true" /> 100+ company sites</span>
+          <span><ShieldCheck aria-hidden="true" /> Official company sources</span>
           <span>{contract?.work_modes?.length ? contract.work_modes.join(" · ") : "Any work mode"}</span>
           {contract?.employment_types?.length ? (
             <span>{contract.employment_types.map((item) => item.replaceAll("_", " ")).join(" · ")}</span>
           ) : null}
+          {schedule?.enabled && schedule.next_run_at ? <span className="schedule-chip"><CalendarClock aria-hidden="true" /> Next search {formatRunTime(schedule.next_run_at)}</span> : null}
         </div>
       </section>
 
@@ -453,7 +481,15 @@ export function JobsPage({
         >
           {savedOnly ? "Showing saved" : "Saved jobs"}
         </button>
-        <span>{visible.length} of {jobs.length} results</span>
+        <span>
+          {hasActiveFilter
+            ? `${visible.length} filtered results`
+            : fallbackToAllResults
+              ? "No current priority-safe roles — showing verified alternatives"
+              : showBroaderResults
+                ? `${visible.length} verified results`
+                : `${focusedJobs.length} current priority roles`}
+        </span>
       </div>
 
       {loading ? (
@@ -468,7 +504,7 @@ export function JobsPage({
               <div className="section-heading">
                 <div>
                   <h2 id={`group-${group}`}>
-                    {group === "contract_results" ? "Other matching jobs" : freshnessLabel(group)}
+                    {group === "contract_results" ? "Broader verified results" : freshnessLabel(group)}
                   </h2>
                   <span>{groupJobs.length} {groupJobs.length === 1 ? "role" : "roles"}</span>
                 </div>
@@ -487,13 +523,22 @@ export function JobsPage({
               </div>
             </section>
           ))}
-          {pagedVisible.length < visible.length ? (
+          {!hasActiveFilter && !showBroaderResults && !fallbackToAllResults && broaderCount ? (
+            <button
+              className="button button--quiet jobs-show-broader"
+              type="button"
+              onClick={() => setShowBroaderResults(true)}
+            >
+              Show {broaderCount} broader verified {broaderCount === 1 ? "result" : "results"}
+            </button>
+          ) : null}
+          {pagedVisible.length < displayedResults.length ? (
             <button
               className="button button--secondary jobs-show-more"
               type="button"
               onClick={() => setVisibleLimit((current) => current + RESULTS_PAGE_SIZE)}
             >
-              Show {Math.min(RESULTS_PAGE_SIZE, visible.length - pagedVisible.length)} more results
+              Show {Math.min(RESULTS_PAGE_SIZE, displayedResults.length - pagedVisible.length)} more results
             </button>
           ) : null}
         </div>
@@ -537,65 +582,64 @@ export function JobsPage({
             >
               <X aria-hidden="true" />
             </button>
-            <div className="detail-drawer__intro">
-              <div>
-                <p className="eyebrow">{selected.company} · Official {selected.source_family}</p>
-                <h2 id="job-detail-title">{selected.title}</h2>
-                <p className="detail-location">
-                  <MapPin aria-hidden="true" /> {selected.location}
-                  {selected.work_mode ? ` · ${selected.work_mode}` : ""}
-                </p>
-                <p className="detail-posted">
-                  {postedLabel(selected.posted_at)} · {freshnessLabel(selected.freshness_class)} · {verificationLabel(selected.verified_at)}
-                </p>
-                <p className="detail-posted">
-                  {salaryLabel(selected.salary)} · {selected.employment_type ?? "Employment type not listed"}
-                </p>
+            <div className="detail-drawer__body">
+              <aside className="detail-drawer__summary">
+                <div className="detail-drawer__intro">
+                  <p className="eyebrow">{selected.company} · Official {selected.source_family}</p>
+                  <h2 id="job-detail-title">{selected.title}</h2>
+                  <p className="detail-location">
+                    <MapPin aria-hidden="true" /> {selected.location}
+                    {selected.work_mode ? ` · ${selected.work_mode}` : ""}
+                  </p>
+                  <p className="detail-posted">
+                    {postedLabel(selected.posted_at)} · {freshnessLabel(selected.freshness_class)}
+                  </p>
+                  <p className="detail-posted">
+                    {salaryLabel(selected.salary)} · {selected.employment_type ?? "Employment type not listed"}
+                  </p>
+                </div>
+                <div className="score-breakdown" role="group" aria-label="Fit factors">
+                  {Object.entries(selected.factors).map(([factor, value]) => (
+                    <div key={factor}>
+                      <span>{factor.replaceAll("_", " ")}</span>
+                      <strong>{Math.round(value)}/{factorMaximum(factor)}</strong>
+                    </div>
+                  ))}
+                </div>
+                <div className="detail-actions">
+                  <button
+                    className="button button--primary"
+                    type="button"
+                    onClick={() => void apply(selected)}
+                    disabled={selected.live_state !== "live" || busyAction === `apply-${selected.id}`}
+                  >
+                    <ExternalLink aria-hidden="true" /> Open application
+                  </button>
+                  <button className="button button--secondary" type="button" onClick={designForSelected}>
+                    <FilePenLine aria-hidden="true" /> Tailor resume
+                  </button>
+                  <button className="button button--secondary" type="button" onClick={askAboutSelected}>
+                    <Sparkles aria-hidden="true" /> Ask Carivyo
+                  </button>
+                </div>
+                <a className="official-source-link" href={selected.source_url} target="_blank" rel="noreferrer">
+                  View official listing source <ArrowUpRight aria-hidden="true" />
+                </a>
+              </aside>
+              <div className="detail-drawer__reading">
+                <WhyThisJob job={selected} />
+                <section className="job-description-panel" aria-labelledby="job-description-title">
+                  <div className="job-description-panel__heading">
+                    <div>
+                      <p className="eyebrow">Official listing</p>
+                      <h3 id="job-description-title">Job description</h3>
+                    </div>
+                    <span>{verificationLabel(selected.verified_at)}</span>
+                  </div>
+                  <div className="job-description">{selected.description}</div>
+                </section>
               </div>
             </div>
-            <div className="score-breakdown" role="group" aria-label="Fit factors">
-              {Object.entries(selected.factors).map(([factor, value]) => (
-                <div key={factor}>
-                  <span>{factor.replaceAll("_", " ")}</span>
-                  <strong>{Math.round(value)}/{factorMaximum(factor)}</strong>
-                </div>
-              ))}
-            </div>
-            <h3>Why it matches</h3>
-            {selected.reasons.length ? (
-              <ul className="detail-list">
-                {selected.reasons.map((reason) => <li key={reason.code}>{reason.text}</li>)}
-              </ul>
-            ) : <p className="muted">No match reasons were returned.</p>}
-            <h3>Risks to review</h3>
-            <ul className="detail-list detail-list--risk">
-              {selected.risks.length
-                ? selected.risks.map((risk) => <li key={risk}>{risk}</li>)
-                : <li>No specific concerns found.</li>}
-            </ul>
-            <div className="detail-actions">
-              <button
-                className="button button--primary"
-                type="button"
-                onClick={() => void apply(selected)}
-                disabled={selected.live_state !== "live" || busyAction === `apply-${selected.id}`}
-              >
-                <ExternalLink aria-hidden="true" /> Open application
-              </button>
-              <button className="button button--secondary" type="button" onClick={designForSelected}>
-                <FilePenLine aria-hidden="true" /> Tailor resume
-              </button>
-              <button className="button button--secondary" type="button" onClick={askAboutSelected}>
-                <Sparkles aria-hidden="true" /> Ask Carivyo
-              </button>
-            </div>
-            <details className="description-details">
-              <summary>Read job description</summary>
-              <div className="job-description">{selected.description}</div>
-            </details>
-            <a className="official-source-link" href={selected.source_url} target="_blank" rel="noreferrer">
-              View official listing source <ArrowUpRight aria-hidden="true" />
-            </a>
           </section>
         </>
       ) : null}
@@ -603,6 +647,32 @@ export function JobsPage({
       {resumeJob ? <ResumeStudio job={resumeJob} onClose={() => setResumeJob(null)} /> : null}
     </>
   );
+}
+
+function WhyThisJob({ job }: { job: Job }) {
+  const explanation = job.why_this_job;
+  if (!explanation) {
+    return <p className="muted">Job explanation is unavailable. Re-run the local search to refresh it.</p>;
+  }
+  return (
+    <section className="why-job" aria-labelledby="why-job-title">
+      <div className="why-job__header">
+        <div>
+          <p className="eyebrow">Decision view</p>
+          <h3 id="why-job-title">Why this job?</h3>
+        </div>
+        <span>{explanation.summary}</span>
+      </div>
+      <WhyJobColumn title="Proven matches" items={explanation.proven.map((item) => item.requirement)} empty="No direct requirement proof was found in approved evidence." tone="proven" />
+      <WhyJobColumn title="Your priorities" items={explanation.priority_alignment} empty="No extra preference signal was added." tone="priority" />
+      <WhyJobColumn title="Unknowns to verify" items={explanation.unknowns.map((item) => item.requirement)} empty="No unresolved metadata or transferable-only match was found." tone="unknown" />
+      <WhyJobColumn title="Genuine gaps" items={explanation.gaps.map((item) => item.requirement)} empty="No unsupported required requirement was detected." tone="gap" />
+    </section>
+  );
+}
+
+function WhyJobColumn({ title, items, empty, tone }: { title: string; items: string[]; empty: string; tone: string }) {
+  return <div className={`why-job__column why-job__column--${tone}`}><h4>{title}</h4>{items.length ? <ul>{items.map((item) => <li key={item}>{item}</li>)}</ul> : <p>{empty}</p>}</div>;
 }
 
 function EmptyJobsState({
@@ -709,7 +779,17 @@ function factorMaximum(factor: string) {
     experience_fit: 13,
     location_fit: 15,
     freshness: 15,
-    preference_fit: 10
+    preference_fit: 10,
+    feedback_fit: 8
   };
   return maximums[factor] ?? 100;
+}
+
+function isFocusedJob(job: Job) {
+  const fresh = ["verified_24h", "verified_48h"].includes(job.freshness_class);
+  const confident = ["strong", "good"].includes(job.tier);
+  const boundaryConcern = job.risks.some((risk) =>
+    /outside (?:your |preferred )?(?:location|work mode|employment type)|senior scope|requires relocation/i.test(risk)
+  );
+  return fresh && confident && !boundaryConcern;
 }

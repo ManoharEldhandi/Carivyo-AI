@@ -159,6 +159,57 @@ class OnboardingService:
                     ),
                 )
 
+        return self._create_session(artifact_id, summary)
+
+    def saved_masters(self) -> List[Dict[str, Any]]:
+        """Expose only intact local resume masters for an explicit fresh start."""
+
+        rows = self.database.fetch_all(
+            """
+            SELECT sa.id, sa.original_name, sa.kind, sa.size_bytes, sa.source_path,
+                   sa.text_path, sa.created_at
+            FROM source_artifacts AS sa
+            JOIN resume_bases AS rb ON rb.artifact_id = sa.id
+            ORDER BY sa.created_at ASC, sa.id ASC
+            """
+        )
+        masters: List[Dict[str, Any]] = []
+        for row in rows:
+            source_path = Path(row["source_path"])
+            text_path = Path(row["text_path"])
+            if source_path.is_file() and text_path.is_file():
+                masters.append(
+                    {
+                        "id": row["id"],
+                        "original_name": row["original_name"],
+                        "kind": row["kind"],
+                        "size_bytes": row["size_bytes"],
+                        "created_at": row["created_at"],
+                    }
+                )
+        return masters
+
+    def begin_from_saved_master(self, artifact_id: str) -> Dict[str, Any]:
+        artifact = self.database.fetch_one(
+            """
+            SELECT sa.* FROM source_artifacts AS sa
+            JOIN resume_bases AS rb ON rb.artifact_id = sa.id
+            WHERE sa.id = ?
+            """,
+            (artifact_id,),
+        )
+        if not artifact:
+            raise ValueError("The saved resume master is unavailable")
+        source_path = Path(artifact["source_path"])
+        text_path = Path(artifact["text_path"])
+        if not source_path.is_file() or not text_path.is_file():
+            raise ValueError("The saved resume master files are unavailable")
+        if self.vault.hash_file(source_path) != artifact["content_hash"]:
+            raise ValueError("The saved resume master no longer matches its import record")
+        _, summary = build_evidence(text_path.read_text(encoding="utf-8"))
+        return self._create_session(artifact_id, summary)
+
+    def _create_session(self, artifact_id: str, summary: Dict[str, Any]) -> Dict[str, Any]:
         questions = default_questions(summary)
         session_id = new_id()
         self.database.execute(

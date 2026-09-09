@@ -1,8 +1,8 @@
 # Carivyo Validation Evidence
 
-Validation date: 2026-07-22
+Validation date: 2026-09-09
 
-Scope: local-first single-user responsive website
+Scope: local-first single-user laptop workspace
 
 ## Automated regression and build
 
@@ -12,10 +12,10 @@ make check
 
 Observed final results:
 
-- Backend: 136 tests passed.
-- Frontend: 35 tests passed across 9 files.
-- Frontend production build: 315.32 kB JavaScript (91.57 kB gzip) and
-  88.25 kB CSS (19.75 kB gzip).
+- Backend: 163 tests passed.
+- Frontend: 36 tests passed across 9 files.
+- Frontend production build: 327.33 kB JavaScript (94.96 kB gzip) and
+  133.44 kB CSS (29.22 kB gzip).
 - Python dependency consistency: no broken requirements.
 - `pip-audit`: no known vulnerabilities in installed dependencies; the local
   editable `carivyo` package is not a PyPI package and is therefore skipped.
@@ -24,10 +24,9 @@ Observed final results:
 - General resume-skill contract validator: passed for both real-browser resume
   run workspaces, including artifact hashes, 27-check binding, evidence scope,
   and approval provenance.
-- One-command launcher smoke: the bare `http://127.0.0.1:5173/` route exchanged
-  the current ephemeral token, loaded the existing local profile and Jobs page,
-  returned HTTP 200 from `/api/jobs`, emitted no browser errors, applied the
-  legacy-plan compatibility normalization, and released both ports on shutdown.
+- One-command laptop-release smoke: `carivyo start --no-browser --port 8423`
+  served the current production build at `/` with HTTP 200 from its
+  loopback-only process and shut down cleanly.
 
 The tests cover reviewed onboarding, profile rollover, typed preference
 interpretation, temporary overrides, strict eligibility gates, contextual
@@ -41,6 +40,18 @@ popup failure handling, chat persistence, runtime/model
 selection, privacy operations, modal focus, and accessibility smoke checks.
 
 ## Real-browser critical journey
+
+The current 2026-09-09 desktop check loaded the real local profile and Jobs
+queue, verified that only the current priority-safe role was shown by default
+while 43 broader verified listings were held behind an explicit control,
+opened the "Why this job?" drawer, reviewed profile scheduling, and opened
+the Resume Studio template chooser. No resume was generated and no application
+was submitted during that check. Screenshots are retained locally under
+`output/playwright/`.
+
+The detailed fixture journey below is historical evidence for the underlying
+workflow and remains useful coverage; its earlier mobile observations are not a
+current product target.
 
 An isolated backend (`127.0.0.1:8422`) and frontend (`127.0.0.1:5175`) used a
 clean temporary data directory and realistic fixtures. The journey completed:
@@ -89,7 +100,8 @@ Screenshots:
 
 ## Accessibility and browser behavior
 
-- Desktop and 390 x 844 mobile layouts were visually inspected.
+- The current target is desktop laptop use. The earlier desktop and 390 x 844
+  mobile inspection is retained as historical evidence only.
 - Resume Studio initially exposed one serious axe finding: its scrollable
   preview lacked keyboard access. The preview is now a named focusable region.
 - Tailoring initially removed the focused action and left focus on the body.

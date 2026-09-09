@@ -10,7 +10,7 @@ export interface RuntimeModel {
   use_cases?: string[];
 }
 
-export type ReasoningEffort = "none" | "low" | "medium" | "high";
+export type ReasoningEffort = "none" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
 
 export interface RuntimeProvider {
   id: string;
@@ -82,11 +82,35 @@ export interface OnboardingState {
   progress: { answered: number; total: number };
 }
 
+export interface SavedResumeMaster {
+  id: string;
+  original_name: string;
+  kind: string;
+  size_bytes: number;
+  created_at: string;
+}
+
 export interface MatchReason {
   code: string;
   text: string;
   evidence_ids: string[];
   job_span: string;
+}
+
+export interface WhyThisJobItem {
+  requirement: string;
+  priority: string;
+  evidence_ids: string[];
+  note?: string;
+}
+
+export interface WhyThisJob {
+  summary: string;
+  proven: WhyThisJobItem[];
+  priority_alignment: string[];
+  unknowns: WhyThisJobItem[];
+  gaps: WhyThisJobItem[];
+  requirement_quality: { status: string; confidence: string; count: number };
 }
 
 export interface Job {
@@ -119,6 +143,7 @@ export interface Job {
   risks: string[];
   evidence_ids: string[];
   latest_feedback?: string;
+  why_this_job?: WhyThisJob;
 }
 
 export interface SearchContract {
@@ -168,6 +193,22 @@ export interface LatestSearchRun {
   finished_at?: string | null;
 }
 
+export interface SearchSchedule {
+  enabled: boolean;
+  cadence: "daily" | "weekly";
+  time: string;
+  weekday: number;
+  notify: boolean;
+  next_run_at?: string | null;
+  last_run_id?: string | null;
+  last_completed_at?: string | null;
+  last_status?: string | null;
+  last_error?: string | null;
+  service_running?: boolean;
+  requires_open_service?: boolean;
+  profile_ready?: boolean;
+}
+
 export interface JobsPayload {
   jobs: Job[];
   count: number;
@@ -175,6 +216,7 @@ export interface JobsPayload {
   locations: Record<string, number>;
   contract: SearchContract;
   latest_run: LatestSearchRun;
+  schedule?: SearchSchedule;
 }
 
 export interface Preference {
@@ -602,6 +644,11 @@ export interface ResumeRun {
     status: string;
     source_compiler?: "tectonic" | "reportlab_fallback";
     editable_source_exact?: boolean;
+    template?: {
+      id: string;
+      label: string;
+      font?: string;
+    };
     export_filename: string;
     mode: string;
     base_mode?: string;
@@ -634,6 +681,26 @@ export interface ResumeRun {
     validation: Record<string, unknown>;
     ats_analysis: ATSAnalysis;
     ats_comparison: ATSComparison;
+    design_advisory?: {
+      status: "not_requested" | "requested" | "complete" | "unavailable";
+      provider?: "codex";
+      model?: string;
+      model_name?: string;
+      reasoning_effort?: ReasoningEffort;
+      summary?: string;
+      advisory?: string;
+      authoritative?: false;
+    };
+    github_evidence?: {
+      status: "not_requested" | "no_linked_repositories" | "complete" | "unavailable";
+      summary?: string;
+      repositories?: Array<{
+        source_url: string;
+        repository: string;
+        languages: string[];
+        jd_terms_observed: string[];
+      }>;
+    };
     section_inventory?: Array<{
       id: string;
       label: string;

@@ -9,6 +9,8 @@ from pydantic import ValidationError
 from app.connectors.base import JobCandidate
 from app.main import build_container
 from app.schemas import PreferenceUpdateRequest
+from app.services.preference_intelligence import parse_locations
+from app.services.search_plan import normalize_search_plan
 from app.utils import json_dumps, new_id, stable_hash, utcnow
 
 from test_integration import RESUME, complete_onboarding
@@ -138,6 +140,21 @@ def test_unspecified_expanded_preferences_compile_to_neutral_values(settings):
     assert plan["salary_min"] is None
     assert plan["salary_currency"] is None
     assert plan["salary_period"] is None
+    assert plan["freshness_policy"] == "strict"
+
+
+def test_legacy_ranking_freshness_plan_is_migrated_to_a_strict_boundary():
+    plan = normalize_search_plan(
+        {"freshness_hours": 24, "freshness_policy": "ranking"}
+    )
+
+    assert plan["freshness_hours"] == 24
+    assert plan["freshness_policy"] == "strict"
+
+
+def test_city_query_does_not_silently_expand_to_india_wide_scope():
+    assert parse_locations("Software Engineer jobs in Hyderabad") == ["Hyderabad"]
+    assert parse_locations("Software Engineer jobs anywhere in India") == ["India"]
 
 
 def test_expanded_preferences_persist_with_provenance_and_compile(client):

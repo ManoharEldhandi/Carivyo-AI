@@ -114,6 +114,16 @@ export function Shell({
         <main id="main-content" className="page-content">
           {children}
         </main>
+        <footer className="product-footer">
+          <span>Manohar Eldhandi</span>
+          <a
+            href="https://github.com/ManoharEldhandi/Carivyo-AI"
+            target="_blank"
+            rel="noreferrer"
+          >
+            GitHub
+          </a>
+        </footer>
       </div>
     </div>
   );

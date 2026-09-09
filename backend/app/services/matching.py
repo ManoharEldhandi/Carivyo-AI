@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+from app.db import Database
 from app.services.profile import ProfileService
 from app.services.preference_intelligence import (
     LOCATION_ALIASES,
@@ -13,8 +14,9 @@ from app.utils import tokenize
 
 
 class MatchingService:
-    def __init__(self, profiles: ProfileService):
+    def __init__(self, profiles: ProfileService, database: Optional[Database] = None):
         self.profiles = profiles
+        self.database = database
 
     def score(
         self,
@@ -81,15 +83,16 @@ class MatchingService:
         )
         if exclusion_hits:
             preference_score = 2.0
-        score = round(
+        feedback_score, feedback_reason = self._feedback_score(job)
+        base_score = (
             role_score
             + skill_score
             + experience_score
             + location_score
             + freshness_score
-            + preference_score,
-            1,
+            + preference_score
         )
+        score = round(min(100.0, max(0.0, base_score + feedback_score)), 1)
 
         reasons: List[Dict[str, Any]] = []
         if role_overlap:
@@ -120,6 +123,8 @@ class MatchingService:
                 }
             )
         reasons.extend(preference_reasons)
+        if feedback_reason:
+            reasons.append(feedback_reason)
         if location_reason:
             reasons.append(
                 {
@@ -169,6 +174,8 @@ class MatchingService:
             if reason["code"] not in selected_reason_codes:
                 selected_reasons.append(reason)
                 selected_reason_codes.add(reason["code"])
+        if feedback_reason and feedback_reason["code"] not in selected_reason_codes:
+            selected_reasons.append(feedback_reason)
         return {
             "score": score,
             "tier": tier,
@@ -179,6 +186,7 @@ class MatchingService:
                 "location_fit": round(location_score, 1),
                 "freshness": round(freshness_score, 1),
                 "preference_fit": round(preference_score, 1),
+                "feedback_fit": round(feedback_score, 1),
             },
             "reasons": selected_reasons,
             "risks": risks[:3],
@@ -189,6 +197,93 @@ class MatchingService:
                     for evidence_id in reason["evidence_ids"]
                 )
             ),
+        }
+
+    def _feedback_score(
+        self,
+        job: Dict[str, Any],
+    ) -> Tuple[float, Optional[Dict[str, Any]]]:
+        """Turn local Keep/Hide/Apply history into a small transparent rerank.
+
+        This deliberately cannot override source eligibility, explicit preferences,
+        or evidence fit. It only gives future ranking a bounded signal from jobs
+        the candidate actually acted on.
+        """
+
+        if not self.database:
+            return 0.0, None
+        rows = self.database.fetch_all(
+            """
+            SELECT j.title, j.company, j.description, latest.event_type
+            FROM jobs AS j
+            JOIN activity_events AS latest ON latest.id = (
+                SELECT ae.id
+                FROM activity_events AS ae
+                WHERE ae.job_id = j.id
+                    AND ae.event_type IN ('save', 'keep', 'more_like_this', 'hide')
+                ORDER BY ae.created_at DESC, ae.rowid DESC
+                LIMIT 1
+            )
+            UNION ALL
+            SELECT j.title, j.company, j.description, 'applied' AS event_type
+            FROM applications AS a
+            JOIN jobs AS j ON j.id = a.job_id
+            WHERE a.status IN ('applied', 'interview', 'offer')
+            """
+        )
+        if not rows:
+            return 0.0, None
+        target_title = set(tokenize(str(job.get("title") or "")))
+        target_terms = set(tokenize(str(job.get("description") or "")))
+        target_company = str(job.get("company") or "").casefold()
+        positive = 0.0
+        negative = 0.0
+        positive_examples: List[str] = []
+        negative_examples: List[str] = []
+        for row in rows:
+            source_title = set(tokenize(str(row.get("title") or "")))
+            source_terms = set(tokenize(str(row.get("description") or "")))
+            title_overlap = (
+                len(target_title & source_title) / len(target_title | source_title)
+                if target_title and source_title
+                else 0.0
+            )
+            term_overlap = (
+                len(target_terms & source_terms) / len(target_terms | source_terms)
+                if target_terms and source_terms
+                else 0.0
+            )
+            same_company = bool(target_company) and target_company == str(
+                row.get("company") or ""
+            ).casefold()
+            similarity = max(title_overlap, term_overlap * 0.55, 1.0 if same_company else 0.0)
+            if similarity < 0.16:
+                continue
+            event_type = row["event_type"]
+            if event_type in {"save", "keep", "more_like_this", "applied"}:
+                weight = 1.25 if event_type == "applied" else 1.0
+                positive += similarity * weight
+                positive_examples.append(str(row.get("title") or "role"))
+            elif event_type == "hide":
+                negative += similarity
+                negative_examples.append(str(row.get("title") or "role"))
+        raw = max(-1.0, min(1.0, positive - negative))
+        score = round(raw * 8.0, 1)
+        if not score:
+            return 0.0, None
+        if score > 0:
+            text = "Your saved or applied roles support this direction"
+            if positive_examples:
+                text += f" (similar to {positive_examples[0]})."
+        else:
+            text = "Your hidden roles suggest this direction needs a closer look"
+            if negative_examples:
+                text += f" (similar to {negative_examples[0]})."
+        return score, {
+            "code": "feedback_learning",
+            "text": text,
+            "evidence_ids": [],
+            "job_span": str(job.get("title") or ""),
         }
 
     @classmethod

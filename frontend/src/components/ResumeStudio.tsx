@@ -25,8 +25,10 @@ import type {
   ATSSemanticReview,
   ExternalATSReport,
   Job,
+  ReasoningEffort,
   ResumeRun,
-  ResumeSource
+  ResumeSource,
+  RuntimeProvider
 } from "../types";
 
 interface Props {
@@ -53,6 +55,13 @@ export function ResumeStudio({ job, onClose }: Props) {
   const [instructions, setInstructions] = useState(
     "Keep it concise, preserve my strongest evidence, and emphasize the requirements I can prove."
   );
+  const [template, setTemplate] = useState<"ai" | "software" | "balanced">("balanced");
+  const [codexProvider, setCodexProvider] = useState<RuntimeProvider | null>(null);
+  const [codexModel, setCodexModel] = useState("gpt-5.6-terra");
+  const [codexReasoningEffort, setCodexReasoningEffort] =
+    useState<ReasoningEffort>("xhigh");
+  const [checkPublicGithub, setCheckPublicGithub] = useState(false);
+  const [githubConsent, setGithubConsent] = useState(false);
   const [revision, setRevision] = useState("");
   const [run, setRun] = useState<ResumeRun | null>(null);
   const [preview, setPreview] = useState<BoundPreview | null>(null);
@@ -94,6 +103,27 @@ export function ResumeStudio({ job, onClose }: Props) {
     }).catch(() => {
       if (active) setAtsEngines([]);
     });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    void api.runtimes()
+      .then((payload) => {
+        if (!active) return;
+        const provider = payload.providers.find((item) => item.id === "codex") ?? null;
+        setCodexProvider(provider);
+        if (!provider?.models.length) return;
+        const preferred =
+          provider.models.find((item) => item.id === "gpt-5.6-terra") ??
+          provider.models.find((item) => item.recommended) ??
+          provider.models[0];
+        setCodexModel(preferred.id);
+        setCodexReasoningEffort(preferredResumeEffort(preferred.reasoning_efforts));
+      })
+      .catch(() => {
+        if (active) setCodexProvider(null);
+      });
     return () => { active = false; };
   }, []);
 
@@ -208,12 +238,25 @@ export function ResumeStudio({ job, onClose }: Props) {
         unresolvedRequirements.length > 0 ||
         atsIssues.length > 0)
   );
+  const selectedCodexModel = codexProvider?.models.find(
+    (item) => item.id === codexModel
+  );
+  const supportedCodexEfforts = selectedCodexModel?.reasoning_efforts ?? [];
+  const codexPlanningAvailable = Boolean(
+    codexProvider?.available && selectedCodexModel && supportedCodexEfforts.includes(codexReasoningEffort)
+  );
 
   async function create() {
     setBusy(true);
     setError("");
     try {
-      setRun(await api.createResume(job.id, instructions));
+      setRun(await api.createResume(job.id, instructions, template, {
+        ...(codexPlanningAvailable
+          ? { model: codexModel, reasoning_effort: codexReasoningEffort }
+          : {}),
+        check_public_github: checkPublicGithub,
+        confirmed_public_github_access: checkPublicGithub && githubConsent
+      }));
       setExternalReport(null);
       setResumeSource(null);
       setSourceEditorOpen(false);
@@ -546,6 +589,21 @@ export function ResumeStudio({ job, onClose }: Props) {
 
             <div className="resume-start__grid">
               <div className="instruction-card">
+                <fieldset className="resume-template-picker">
+                  <legend>Resume template</legend>
+                  <div>
+                    {[
+                      ["balanced", "Balanced", "AI, backend, and applied work"],
+                      ["ai", "AI engineering", "Agents, ML, retrieval, and evaluation"],
+                      ["software", "Software engineering", "Backend, Java, APIs, and product delivery"]
+                    ].map(([value, label, detail]) => (
+                      <label key={value} className={template === value ? "is-selected" : ""}>
+                        <input type="radio" name="resume-template" value={value} checked={template === value} onChange={() => setTemplate(value as typeof template)} disabled={busy} />
+                        <span><strong>{label}</strong><small>{detail}</small></span>
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
                 <label htmlFor="resume-instructions">What should this version prioritize?</label>
                 <textarea
                   id="resume-instructions"
@@ -556,13 +614,81 @@ export function ResumeStudio({ job, onClose }: Props) {
                   disabled={busy}
                 />
                 <span>Natural language is fine. Truth and validation rules always win.</span>
+                <section className="resume-codex-controls" aria-labelledby="resume-codex-title">
+                  <div>
+                    <p className="eyebrow">Codex design review</p>
+                    <h4 id="resume-codex-title">Read the JD before the evidence-gated build</h4>
+                  </div>
+                  <div className="resume-codex-controls__fields">
+                    <label htmlFor="resume-codex-model">
+                      Model
+                      <select
+                        id="resume-codex-model"
+                        value={codexModel}
+                        onChange={(event) => {
+                          const nextModel = codexProvider?.models.find(
+                            (item) => item.id === event.target.value
+                          );
+                          setCodexModel(event.target.value);
+                          setCodexReasoningEffort((current) => compatibleResumeEffort(current, nextModel?.reasoning_efforts));
+                        }}
+                        disabled={busy || !codexProvider?.models.length}
+                      >
+                        {(codexProvider?.models ?? [{ id: "gpt-5.6-terra", name: "GPT-5.6 Terra" }]).map((model) => (
+                          <option key={model.id} value={model.id}>{model.name}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label htmlFor="resume-codex-effort">
+                      Reasoning effort
+                      <select
+                        id="resume-codex-effort"
+                        value={codexReasoningEffort}
+                        onChange={(event) => setCodexReasoningEffort(event.target.value as ReasoningEffort)}
+                        disabled={busy || !supportedCodexEfforts.length}
+                      >
+                        {(supportedCodexEfforts.length ? supportedCodexEfforts : ["xhigh" as ReasoningEffort]).map((effort) => (
+                          <option key={effort} value={effort}>{resumeEffortLabel(effort)}</option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                  <p className="muted">
+                    {codexPlanningAvailable
+                      ? "Default: GPT-5.6 Terra · Extra high. Codex creates a reviewable plan; approved evidence and the master wording control the final resume."
+                      : "Codex is not connected. The deterministic evidence-gated build remains available; connect Codex to enable the advisory plan."}
+                  </p>
+                  <label className="resume-github-consent">
+                    <input
+                      type="checkbox"
+                      checked={checkPublicGithub}
+                      onChange={(event) => {
+                        setCheckPublicGithub(event.target.checked);
+                        if (!event.target.checked) setGithubConsent(false);
+                      }}
+                      disabled={busy}
+                    />
+                    Check direct public GitHub repository links already present in approved evidence.
+                  </label>
+                  {checkPublicGithub ? (
+                    <label className="resume-github-consent">
+                      <input
+                        type="checkbox"
+                        checked={githubConsent}
+                        onChange={(event) => setGithubConsent(event.target.checked)}
+                        disabled={busy}
+                      />
+                      I approve this limited public GitHub check. It may prioritize existing claims but cannot add a new fact to my resume.
+                    </label>
+                  ) : null}
+                </section>
               </div>
               <div className="resume-guardrails">
                 <p className="eyebrow">Built-in guardrails</p>
                 {[
                   "Approved evidence only",
                   "Every recognized source section preserved",
-                  "Local hiring-manager review when Ollama is available",
+                  "Optional Codex JD-and-evidence advisory",
                   "Original resume never overwritten",
                   "Unsupported requirements stay visible",
                   "PDF, links, layout, and extraction validated"
@@ -884,6 +1010,29 @@ export function ResumeStudio({ job, onClose }: Props) {
                     )}
                   </div>
                 </details>
+
+                {run.result.design_advisory ? (
+                  <details className="resume-supporting-details resume-advisory" open={run.result.design_advisory.status === "complete"}>
+                    <summary>Codex design advisory</summary>
+                    <div className="resume-supporting-details__body">
+                      <p className="muted">
+                        {run.result.design_advisory.model_name ?? run.result.design_advisory.model ?? "Codex"}
+                        {run.result.design_advisory.reasoning_effort
+                          ? ` · ${resumeEffortLabel(run.result.design_advisory.reasoning_effort)}`
+                          : ""}
+                      </p>
+                      <p>{run.result.design_advisory.summary ?? "No Codex advisory was requested for this draft."}</p>
+                      {run.result.design_advisory.advisory ? (
+                        <pre className="resume-advisory__content">{run.result.design_advisory.advisory}</pre>
+                      ) : null}
+                      {run.result.github_evidence ? (
+                        <p className="muted">
+                          {run.result.github_evidence.summary ?? "No public GitHub evidence check was requested."}
+                        </p>
+                      ) : null}
+                    </div>
+                  </details>
+                ) : null}
 
                 <details className="resume-supporting-details">
                   <summary>Sections and local hiring-manager review</summary>
@@ -1310,6 +1459,26 @@ function validationPassed(key: string, value: unknown) {
     (key === "change_budget_status" &&
       ["within_target", "within_review_budget", "not_applicable"].includes(String(value)))
   );
+}
+
+function preferredResumeEffort(efforts: ReasoningEffort[] | undefined): ReasoningEffort {
+  if (efforts?.includes("xhigh")) return "xhigh";
+  if (efforts?.includes("high")) return "high";
+  return efforts?.[0] ?? "xhigh";
+}
+
+function compatibleResumeEffort(
+  current: ReasoningEffort,
+  efforts: ReasoningEffort[] | undefined
+): ReasoningEffort {
+  if (efforts?.includes(current)) return current;
+  return preferredResumeEffort(efforts);
+}
+
+function resumeEffortLabel(effort: ReasoningEffort) {
+  return effort === "xhigh"
+    ? "Extra high"
+    : effort.replace(/\b\w/g, (character) => character.toUpperCase());
 }
 
 function humanizeValidationValue(

@@ -4,6 +4,7 @@ import {
   ArrowDown,
   ArrowUp,
   BrainCircuit,
+  CalendarClock,
   CheckCircle2,
   Cpu,
   Database,
@@ -27,7 +28,8 @@ import type {
   RuntimeModel,
   RuntimeSelection,
   RuntimeSettingsResponse,
-  RuntimeState
+  RuntimeState,
+  SearchSchedule
 } from "../types";
 import { runtimeDisplay } from "./Shell";
 
@@ -68,6 +70,13 @@ interface CandidateProfileDraft {
 }
 
 const FRESHNESS_OPTIONS = [24, 48, 72, 168];
+const DEFAULT_SCHEDULE: SearchSchedule = {
+  enabled: false,
+  cadence: "daily",
+  time: "09:00",
+  weekday: 0,
+  notify: false
+};
 const SALARY_CURRENCIES = ["INR", "USD", "EUR", "GBP"];
 const EMPLOYMENT_TYPES: Array<{
   value: PreferenceSettings["employment_types"][number];
@@ -94,9 +103,10 @@ export function ProfilePage({
   const [resumePreview, setResumePreview] = useState<ResumeRefreshPreview | null>(null);
   const [resumeReview, setResumeReview] = useState<OnboardingProfileReview | null>(null);
   const [runtimeDraft, setRuntimeDraft] = useState<RuntimeSelection>(runtime.selection);
+  const [schedule, setSchedule] = useState<SearchSchedule>(DEFAULT_SCHEDULE);
   const [busy, setBusy] = useState<
     "profile" | "preferences" | "resume-preview" | "resume-confirm" | "runtime" |
-    "backup" | "export" | "delete" | ""
+    "schedule" | "backup" | "export" | "reset" | ""
   >("");
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
@@ -109,6 +119,15 @@ export function ProfilePage({
       })
       .catch(() => undefined);
   }, [onProfileRefresh]);
+
+  useEffect(() => {
+    void api
+      .searchSchedule()
+      .then((response) => {
+        if (isSearchSchedule(response)) setSchedule(response);
+      })
+      .catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     setDraft(preferenceDraft(profile));
@@ -176,7 +195,7 @@ export function ProfilePage({
         freshness_hours: draft.freshness_hours
       });
       await refreshProfile();
-      setNotice("Search priorities saved. New searches will rank close matches and keep missing metadata visible.");
+      setNotice(`Search priorities saved. Only official roles posted within ${draft.freshness_hours} hours can enter the queue.`);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Search priorities could not be saved.");
     } finally {
@@ -297,6 +316,29 @@ export function ProfilePage({
     }
   }
 
+  async function saveSchedule() {
+    let next = schedule;
+    if (next.notify && typeof Notification !== "undefined" && Notification.permission === "default") {
+      const permission = await Notification.requestPermission();
+      if (permission !== "granted") {
+        next = { ...next, notify: false };
+        setSchedule(next);
+        setNotice("Browser notifications were not allowed, so the schedule was saved without them.");
+      }
+    }
+    setBusy("schedule");
+    setError("");
+    try {
+      const saved = await api.updateSearchSchedule(next);
+      setSchedule(saved);
+      setNotice(saved.enabled ? `Scheduled ${saved.cadence} search saved.` : "Scheduled search turned off.");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Search schedule could not be saved.");
+    } finally {
+      setBusy("");
+    }
+  }
+
   async function backup() {
     setBusy("backup");
     setError("");
@@ -332,20 +374,20 @@ export function ProfilePage({
     }
   }
 
-  async function deleteData() {
+  async function resetWorkspace() {
     const confirmed = window.confirm(
-      "Delete all Carivyo profiles, jobs, resumes, chat history, applications, artifacts, and backups from this computer? This cannot be undone."
+      "Start Carivyo over? Jobs, searches, generated resumes, ATS reports, chat, applications, preferences, runtime files, and backups will be permanently removed. Your imported resume master stays on this device for a new review."
     );
     if (!confirmed) return;
-    setBusy("delete");
+    setBusy("reset");
     setError("");
     setNotice("");
     try {
-      await api.deleteData();
+      await api.resetDataKeepMasters();
       localStorage.removeItem("carivyo-conversation-id");
       window.location.reload();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Local data could not be deleted.");
+      setError(caught instanceof Error ? caught.message : "The workspace could not be reset.");
       setBusy("");
     }
   }
@@ -401,7 +443,7 @@ export function ProfilePage({
             <span className="settings-section__icon"><MapPinned aria-hidden="true" /></span>
             <div>
               <h2 id="priorities-title">Set your job search priorities</h2>
-              <p>Rank the roles and locations you want. Carivyo keeps close matches with missing metadata and labels the tradeoffs.</p>
+              <p>Rank roles and locations in the order you want them. The freshness limit is strict: a 24-hour search never shows an older role.</p>
             </div>
           </div>
 
@@ -412,14 +454,33 @@ export function ProfilePage({
               values={draft.target_roles}
               onChange={(target_roles) => setDraft((current) => ({ ...current, target_roles }))}
             />
-            <PriorityEditor
-              label="Preferred locations"
-              hint="First location is searched first"
-              values={draft.preferred_locations}
-              onChange={(preferred_locations) =>
-                setDraft((current) => ({ ...current, preferred_locations }))
-              }
-            />
+            <div className="priority-editor-group">
+              <PriorityEditor
+                label="Preferred locations"
+                hint="First location is searched first"
+                values={draft.preferred_locations}
+                onChange={(preferred_locations) =>
+                  setDraft((current) => ({ ...current, preferred_locations }))
+                }
+              />
+              <div className="priority-editor-group__coverage">
+                <span>Need broader India coverage?</span>
+                <button
+                  className="button button--quiet"
+                  type="button"
+                  disabled={draft.preferred_locations.some((value) => value.trim().toLowerCase() === "india")}
+                  onClick={() =>
+                    setDraft((current) => ({
+                      ...current,
+                      preferred_locations: [...normalizeList(current.preferred_locations), "India"]
+                    }))
+                  }
+                >
+                  Add India-wide coverage
+                </button>
+                <small>Includes official roles listed only by supported Indian cities; it does not change your existing priority order.</small>
+              </div>
+            </div>
           </div>
 
           <details className="secondary-disclosure">
@@ -624,6 +685,58 @@ export function ProfilePage({
             >
               {busy === "preferences" ? <LoaderCircle className="spin" aria-hidden="true" /> : null}
               Save priorities
+            </button>
+          </div>
+        </section>
+
+        <section className="settings-section schedule-section" aria-labelledby="schedule-title">
+          <div className="settings-section__heading">
+            <span className="settings-section__icon"><CalendarClock aria-hidden="true" /></span>
+            <div>
+              <h2 id="schedule-title">Scheduled search</h2>
+              <p>Check your saved priorities automatically while Carivyo is open.</p>
+            </div>
+          </div>
+          <div className="schedule-controls">
+            <label className="local-mode-control">
+              <input
+                type="checkbox"
+                checked={schedule.enabled}
+                onChange={(event) => setSchedule((current) => ({ ...current, enabled: event.target.checked }))}
+              />
+              <span><strong>Run saved-priority searches automatically</strong><small>Missed searches run once when the local service opens again.</small></span>
+            </label>
+            <label className="form-field">
+              <span>Cadence</span>
+              <select
+                value={schedule.cadence}
+                onChange={(event) => setSchedule((current) => ({ ...current, cadence: event.target.value as SearchSchedule["cadence"] }))}
+              >
+                <option value="daily">Daily</option>
+                <option value="weekly">Weekly</option>
+              </select>
+            </label>
+            {schedule.cadence === "weekly" ? (
+              <label className="form-field">
+                <span>Day</span>
+                <select value={schedule.weekday} onChange={(event) => setSchedule((current) => ({ ...current, weekday: Number(event.target.value) }))}>
+                  {["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"].map((day, index) => <option value={index} key={day}>{day}</option>)}
+                </select>
+              </label>
+            ) : null}
+            <label className="form-field">
+              <span>Local time</span>
+              <input type="time" value={schedule.time} onChange={(event) => setSchedule((current) => ({ ...current, time: event.target.value }))} />
+            </label>
+            <label className="local-mode-control schedule-notify">
+              <input type="checkbox" checked={schedule.notify} onChange={(event) => setSchedule((current) => ({ ...current, notify: event.target.checked }))} />
+              <span><strong>Notify when the search finishes</strong><small>Optional browser notification while this workspace is open.</small></span>
+            </label>
+          </div>
+          <div className="settings-section__footer">
+            <span>{schedule.enabled && schedule.next_run_at ? `Next run: ${formatScheduleTime(schedule.next_run_at)}` : "No automatic search scheduled."}</span>
+            <button className="button button--primary" type="button" onClick={() => void saveSchedule()} disabled={Boolean(busy)}>
+              {busy === "schedule" ? <LoaderCircle className="spin" aria-hidden="true" /> : null} Save schedule
             </button>
           </div>
         </section>
@@ -1074,17 +1187,17 @@ export function ProfilePage({
           </div>
         </details>
         <details className="secondary-disclosure danger-disclosure">
-          <summary>Delete local data</summary>
+          <summary>Start fresh</summary>
           <div>
-            <p>Permanently remove profiles, jobs, resumes, chat, applications, artifacts, and backups from this computer.</p>
+            <p>Permanently clear the active profile, jobs, generated resumes, ATS reports, chat, applications, preferences, runtime files, and backups. Your imported resume master stays available for a fresh review.</p>
             <button
               className="button button--danger"
               type="button"
-              onClick={() => void deleteData()}
+              onClick={() => void resetWorkspace()}
               disabled={Boolean(busy)}
             >
-              {busy === "delete" ? <LoaderCircle className="spin" aria-hidden="true" /> : <Trash2 aria-hidden="true" />}
-              Delete all local data
+              {busy === "reset" ? <LoaderCircle className="spin" aria-hidden="true" /> : <Trash2 aria-hidden="true" />}
+              Reset workspace, keep resume master
             </button>
           </div>
         </details>
@@ -1454,8 +1567,14 @@ function candidateProfileDraft(profile: ProfilePayload): CandidateProfileDraft {
 
 function preferenceDraft(profile: ProfilePayload): PreferenceDraft {
   const values = new Map(profile.preferences.map((item) => [item.key, item.value]));
+  const savedTargetRoles = asList(values.get("target_roles"), []).filter(Boolean);
+  const plannedTargetRoles = asList(profile.search_plan?.plan?.target_roles, []).filter(Boolean);
   return {
-    target_roles: asList(values.get("target_roles"), profile.profile.role_families),
+    target_roles: savedTargetRoles.length
+      ? savedTargetRoles
+      : plannedTargetRoles.length
+        ? plannedTargetRoles
+        : asList(profile.profile.role_families, [""]).filter(Boolean),
     preferred_locations: asList(values.get("preferred_locations"), ["Remote India"]),
     preferred_industries: asList(values.get("preferred_industries"), []).join(", "),
     preferred_companies: asList(values.get("preferred_companies"), []).join(", "),
@@ -1592,4 +1711,26 @@ function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatScheduleTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "time unavailable";
+  return new Intl.DateTimeFormat(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  }).format(date);
+}
+
+function isSearchSchedule(value: unknown): value is SearchSchedule {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      "enabled" in value &&
+      "cadence" in value &&
+      "time" in value
+  );
 }

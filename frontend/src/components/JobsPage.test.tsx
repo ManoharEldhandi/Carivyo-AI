@@ -7,6 +7,7 @@ import { JobsPage } from "./JobsPage";
 vi.mock("../api", () => ({
   api: {
     jobs: vi.fn(),
+    job: vi.fn(),
     createSearch: vi.fn(),
     searchRun: vi.fn(),
     prepareApplication: vi.fn(),
@@ -86,6 +87,7 @@ async function renderApplicationAction() {
 describe("JobsPage application handoff", () => {
   beforeEach(() => {
     vi.mocked(api.jobs).mockResolvedValue(jobsPayload);
+    vi.mocked(api.job).mockResolvedValue(job);
     vi.mocked(api.prepareApplication).mockResolvedValue(application);
     vi.mocked(api.openApply).mockResolvedValue({
       application: { ...application, status: "opened" },
@@ -190,5 +192,34 @@ describe("JobsPage application handoff", () => {
     expect(screen.queryByText("Backend Software Engineer 25")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /show 6 more results/i }));
     expect(await screen.findByText("Backend Software Engineer 30")).toBeInTheDocument();
+  });
+
+  it("leads with current, priority-safe roles and reveals broader results deliberately", async () => {
+    const broaderJob: Job = {
+      ...job,
+      id: "job-broader",
+      title: "Older Platform Engineer",
+      freshness_class: "older_live",
+      tier: "possible"
+    };
+    vi.mocked(api.jobs).mockResolvedValue({
+      ...jobsPayload,
+      jobs: [job, broaderJob],
+      count: 2
+    });
+
+    render(
+      <JobsPage
+        onRunChange={vi.fn()}
+        onSelectJob={vi.fn()}
+        onOpenChat={vi.fn()}
+        onEditPriorities={vi.fn()}
+      />
+    );
+
+    expect(await screen.findByText(job.title)).toBeInTheDocument();
+    expect(screen.queryByText(broaderJob.title)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /show 1 broader verified result/i }));
+    expect(await screen.findByText(broaderJob.title)).toBeInTheDocument();
   });
 });

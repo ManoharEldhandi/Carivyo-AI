@@ -7,6 +7,7 @@ import { ResumeStudio } from "./ResumeStudio";
 vi.mock("../api", () => ({
   api: {
     createResume: vi.fn(),
+    runtimes: vi.fn(),
     latestResumeRun: vi.fn(),
     reviseResume: vi.fn(),
     approveResume: vi.fn(),
@@ -158,6 +159,30 @@ describe("ResumeStudio run and variant state", () => {
   const revokeObjectURL = vi.fn();
 
   beforeEach(() => {
+    vi.mocked(api.runtimes).mockResolvedValue({
+      mode: "provider",
+      selection: { provider: "codex", model: "gpt-5.6-terra", reasoning_effort: "low" },
+      providers: [
+        {
+          id: "codex",
+          name: "Codex CLI",
+          kind: "cli",
+          available: true,
+          supports_sessions: true,
+          supports_usage: false,
+          privacy: "provider",
+          models: [
+            {
+              id: "gpt-5.6-terra",
+              name: "GPT-5.6 Terra",
+              profile: "balanced",
+              recommended: true,
+              reasoning_efforts: ["low", "medium", "high", "xhigh"]
+            }
+          ]
+        }
+      ]
+    });
     vi.mocked(api.latestResumeRun).mockResolvedValue({ run: null });
     vi.mocked(api.atsEngines).mockResolvedValue({
       default: "local",
@@ -449,5 +474,25 @@ describe("ResumeStudio official application handoff", () => {
     expect(await screen.findByLabelText("Resume draft 2")).toBeInTheDocument();
     expect(api.createResume).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: /new version/i })).toBeInTheDocument();
+  });
+
+  it("uses Terra at extra-high reasoning for a new Codex design review", async () => {
+    vi.mocked(api.createResume).mockResolvedValue(makeRun(1));
+    render(<ResumeStudio job={job} onClose={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /create tailored resume/i }));
+
+    await waitFor(() => {
+      expect(api.createResume).toHaveBeenCalledWith(
+        job.id,
+        expect.any(String),
+        "balanced",
+        expect.objectContaining({
+          model: "gpt-5.6-terra",
+          reasoning_effort: "xhigh",
+          check_public_github: false
+        })
+      );
+    });
   });
 });

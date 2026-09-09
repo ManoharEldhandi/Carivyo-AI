@@ -37,6 +37,7 @@ from app.services.preference_intelligence import (
     excluded_term_matches,
 )
 from app.services.search_plan import SearchPlanService, normalize_search_plan
+from app.services.requirements import analyze_job_description, match_requirements
 from app.utils import (
     json_dumps,
     json_loads,
@@ -107,40 +108,44 @@ COMPANY_SPECIFIC_ROLE_ALIASES = {
     "oracle": {"applications developer 1", "software developer 1"},
 }
 
-SOFTWARE_SCOPE_TERMS = {
+TECHNICAL_IMPLEMENTATION_TERMS = {
     "api",
     "backend",
-    "cloud",
     "code",
     "coding",
     "computer science",
     "developer",
-    "development",
     "devops",
-    "engineering",
     "frontend",
     "full stack",
     "generative ai",
     "infrastructure",
     "java",
     "javascript",
+    "kubernetes",
     "llm",
     "machine learning",
+    "microservices",
     "ml",
     "platform",
     "python",
-    "software",
-    "systems",
+    "react",
+    "rest",
+    "sql",
+    "spring",
+    "typescript",
 }
 
 INDIA_LOCATION_MARKERS = {
     "ahmedabad",
     "bangalore",
     "bengaluru",
+    "bhubaneswar",
     "chandigarh",
     "chennai",
     "coimbatore",
     "delhi",
+    "goa",
     "gurgaon",
     "gurugram",
     "hyderabad",
@@ -149,9 +154,19 @@ INDIA_LOCATION_MARKERS = {
     "jaipur",
     "kochi",
     "kolkata",
+    "lucknow",
     "mumbai",
+    "mysore",
+    "mysuru",
+    "nagpur",
     "noida",
     "pune",
+    "surat",
+    "thiruvananthapuram",
+    "trivandrum",
+    "vadodara",
+    "visakhapatnam",
+    "vizag",
 }
 
 APPLY_HOSTS = {
@@ -300,7 +315,12 @@ class SearchService:
                         (f"fixture-{family}", family, f"Fixture {family}"),
                     )
 
-    def create_run(self, temporary_instruction: Optional[str] = None) -> Dict[str, Any]:
+    def create_run(
+        self,
+        temporary_instruction: Optional[str] = None,
+        *,
+        reason: str = "manual",
+    ) -> Dict[str, Any]:
         plan = (
             self.plans.compile_temporary(temporary_instruction)
             if temporary_instruction
@@ -309,10 +329,10 @@ class SearchService:
         run_id = new_id()
         self.database.execute(
             """
-            INSERT INTO search_runs(id, plan_id, status, stage)
-            VALUES (?, ?, 'queued', 'queued')
+            INSERT INTO search_runs(id, plan_id, status, stage, coverage_json)
+            VALUES (?, ?, 'queued', 'queued', ?)
             """,
-            (run_id, plan["id"]),
+            (run_id, plan["id"], json_dumps({"trigger": reason})),
         )
         return {"id": run_id, "plan": plan}
 
@@ -347,7 +367,9 @@ class SearchService:
     ) -> None:
 
         connectors = self._connectors()
+        previous_coverage = json_loads(row.get("coverage_json"), {})
         coverage: Dict[str, Any] = {
+            "trigger": previous_coverage.get("trigger", "manual"),
             "sources": [],
             "families": {
                 family: 0 for family in plan.get("source_families", [])
@@ -846,10 +868,12 @@ class SearchService:
                 if not cls._contains_phrase(title, alias):
                     continue
                 # A bare analyst title is meaningful at several employers, but it
-                # must still prove an engineering/software scope in the official JD.
+                # must contain an implementation signal. A division or a job
+                # function labelled "Engineering" alone is organizational
+                # metadata, not proof that the role writes software.
                 if alias == "analyst" and not any(
                     cls._contains_phrase(f"{title} {description}", term)
-                    for term in SOFTWARE_SCOPE_TERMS
+                    for term in TECHNICAL_IMPLEMENTATION_TERMS
                 ):
                     continue
                 return True
@@ -1381,6 +1405,10 @@ class SearchService:
             posted = parse_utc_datetime(job.get("posted_at"))
             return posted.timestamp() if posted else 0.0
 
+        # The queue needs only its compact, persisted match reasons. Full
+        # requirement-to-evidence analysis belongs to the explicit detail
+        # request below; recalculating it for every visible card makes a large
+        # local queue unnecessarily slow.
         jobs.sort(
             key=lambda job: (
                 -float(job["score"]),
@@ -1497,7 +1525,94 @@ class SearchService:
         )
         if not row:
             raise KeyError("Job not found")
-        return self._hydrate_job(row)
+        job = self._hydrate_job(row)
+        job["why_this_job"] = self._why_this_job(job)
+        return job
+
+    def _why_this_job(self, job: Dict[str, Any]) -> Dict[str, Any]:
+        """Explain a recommendation without turning JD demand into candidate proof."""
+
+        evidence = self.profiles.approved_evidence()
+        profile = self.profiles.active_profile() or {"profile": {}}
+        sections: Dict[str, List[str]] = {
+            "skills": [str(value) for value in profile["profile"].get("skills", [])],
+            "experience": [],
+            "projects": [],
+            "achievements": [],
+        }
+        for claim in evidence:
+            category = str(claim.get("category") or "")
+            target = category if category in sections else "experience"
+            sections[target].append(str(claim.get("text") or ""))
+        quality = analyze_job_description(job.get("description", ""), job.get("title", ""))
+        alignment = match_requirements(quality["requirements"], sections)
+
+        def evidence_ids_for(item: Dict[str, Any]) -> List[str]:
+            terms = [str(term).casefold() for term in item.get("matched_entities", [])]
+            terms.extend(str(term).casefold() for term in item.get("matched_terms", [])[:4])
+            return [
+                claim["id"]
+                for claim in evidence
+                if any(term and term in str(claim.get("text") or "").casefold() for term in terms)
+            ][:5]
+
+        proven = []
+        unknowns = []
+        gaps = []
+        for item in alignment["requirements"]:
+            status = item["match_status"]
+            entry = {
+                "requirement": item["text"],
+                "priority": item["priority"],
+                "evidence_ids": evidence_ids_for(item),
+            }
+            if status == "direct":
+                proven.append(entry)
+            elif status in {"listed_only", "transferable"}:
+                unknowns.append(
+                    {
+                        **entry,
+                        "note": (
+                            "Listed in the profile; verify demonstrated use before claiming it."
+                            if status == "listed_only"
+                            else "Related evidence exists, but this exact requirement is not proven."
+                        ),
+                    }
+                )
+            elif item["priority"] == "required":
+                gaps.append({**entry, "note": "No approved evidence currently supports this requirement."})
+
+        priority_codes = {
+            "role_alignment",
+            "preferred_company",
+            "preferred_industry",
+            "priority_skill",
+            "location_fit",
+            "freshness",
+            "feedback_learning",
+        }
+        priority_alignment = [
+            reason["text"]
+            for reason in job.get("reasons", [])
+            if reason.get("code") in priority_codes
+        ]
+        for risk in job.get("risks", []):
+            unknowns.append({"requirement": risk, "priority": "review", "evidence_ids": [], "note": "Check the official listing before applying."})
+        return {
+            "summary": (
+                f"{len(proven)} proven requirement match(es), {len(gaps)} genuine gap(s), "
+                f"and {len(unknowns)} item(s) to verify."
+            ),
+            "proven": proven[:6],
+            "priority_alignment": priority_alignment[:5],
+            "unknowns": unknowns[:6],
+            "gaps": gaps[:6],
+            "requirement_quality": {
+                "status": quality["status"],
+                "confidence": quality["confidence"],
+                "count": quality["requirement_count"],
+            },
+        }
 
     def verify(self, job_id: str) -> Dict[str, Any]:
         job = self.get_job(job_id)

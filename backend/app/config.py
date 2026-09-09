@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     connector_concurrency: int = 6
     connector_min_interval_seconds: float = 0.15
     connector_deadline_seconds: float = 60.0
+    scheduler_poll_seconds: int = 30
     api_requests_per_minute: int = 600
     fixture_jobs_path: Optional[Path] = None
     codex_model: str = "gpt-5.6-terra"

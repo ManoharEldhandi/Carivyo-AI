@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ArrowRight,
   Check,
@@ -12,6 +12,7 @@ import {
 import { api } from "../api";
 import type {
   OnboardingProfileReview,
+  SavedResumeMaster,
   OnboardingState
 } from "../types";
 
@@ -38,6 +39,13 @@ export function Onboarding({ onComplete }: Props) {
   const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState("");
+  const [savedMasters, setSavedMasters] = useState<SavedResumeMaster[]>([]);
+
+  useEffect(() => {
+    void api.savedResumeMasters()
+      .then((response) => setSavedMasters(response.masters))
+      .catch(() => setSavedMasters([]));
+  }, []);
 
   async function upload(file?: File) {
     if (!file) return;
@@ -49,6 +57,20 @@ export function Onboarding({ onComplete }: Props) {
       setProfileReview(profileReviewDraft(response.summary));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Resume import failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function useSavedMaster(master: SavedResumeMaster) {
+    setBusy(true);
+    setError("");
+    try {
+      const response = await api.useSavedResumeMaster(master.id);
+      setState(response);
+      setProfileReview(profileReviewDraft(response.summary));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Saved resume could not be prepared.");
     } finally {
       setBusy(false);
     }
@@ -215,6 +237,23 @@ export function Onboarding({ onComplete }: Props) {
               accept=".pdf,.docx,.tex,.md,.markdown,.txt"
               onChange={(event) => void upload(event.target.files?.[0])}
             />
+            {savedMasters.length ? (
+              <div className="saved-master-choice">
+                <span>Or start from a saved master</span>
+                {savedMasters.map((master) => (
+                  <button
+                    className="button button--secondary"
+                    key={master.id}
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void useSavedMaster(master)}
+                  >
+                    <FileSearch aria-hidden="true" /> Use {master.original_name}
+                  </button>
+                ))}
+                <small>It stays on this device and still requires a fresh profile review.</small>
+              </div>
+            ) : null}
 
           </div>
         ) : (

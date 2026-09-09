@@ -142,8 +142,10 @@ role families, and missing official-direct links are eligibility gates. A fit
 score can never compensate for those failures. Missing salary, work mode,
 employment type, or posting timestamp is instead unknown evidence: the job may
 enter the feed with a lower score and an explicit risk. Ordered locations and
-freshness are ranking signals unless a one-time instruction explicitly makes
-them strict.
+locations are ordered ranking signals. A selected freshness window is an
+explicit hard boundary: a 24-hour plan never includes a role older than 24
+hours, and unverified posting dates do not bypass that boundary. A one-time
+instruction uses its own explicitly selected freshness window.
 
 The normal plan expands saved target labels with adjacent role families proven
 by the active resume. Company-specific early-career aliases are scoped by

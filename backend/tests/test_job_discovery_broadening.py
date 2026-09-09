@@ -111,6 +111,11 @@ def test_company_specific_early_career_titles_require_the_right_scope(settings):
         company="Goldman Sachs",
         description="Perform financial reporting and investment analysis.",
     )
+    goldman_generic_engineering = candidate(
+        title="Compliance Engineering - Analyst",
+        company="Goldman Sachs",
+        description="Division: Engineering. Job function: Software Engineering. Skills:",
+    )
 
     assert "role_outside_policy" not in search._candidate_rejection_reasons(
         salesforce, broad_plan(role_aliases=[])
@@ -120,6 +125,9 @@ def test_company_specific_early_career_titles_require_the_right_scope(settings):
     )
     assert "role_outside_policy" in search._candidate_rejection_reasons(
         goldman_finance, broad_plan(role_aliases=[])
+    )
+    assert "role_outside_policy" in search._candidate_rejection_reasons(
+        goldman_generic_engineering, broad_plan(role_aliases=[])
     )
 
 
@@ -133,6 +141,18 @@ def test_ranked_location_keeps_unknowns_but_rejects_clear_foreign_only_roles(set
     )
     assert "location_outside_policy" in search._candidate_rejection_reasons(
         foreign, broad_plan()
+    )
+
+
+def test_india_wide_priority_includes_official_city_only_locations(settings):
+    search = build_container(settings).search
+    city_only = candidate(location="Visakhapatnam")
+
+    assert "location_outside_policy" not in search._candidate_rejection_reasons(
+        city_only, broad_plan(locations=["India"], location_policy="strict")
+    )
+    assert "location_outside_policy" in search._candidate_rejection_reasons(
+        city_only, broad_plan(locations=["Pune"], location_policy="strict")
     )
 
 

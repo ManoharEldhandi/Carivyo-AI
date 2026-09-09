@@ -43,9 +43,9 @@ def test_ollama_cloud_pointers_are_not_reported_as_local(settings, monkeypatch):
         lambda: ["llama-local:latest"],
     )
     assert gateway.selection() == {
-        "provider": "ollama",
-        "model": "llama-local:latest",
-        "reasoning_effort": "none",
+        "provider": "codex",
+        "model": settings.codex_model,
+        "reasoning_effort": "low",
         "fully_local": False,
     }
 

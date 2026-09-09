@@ -7,7 +7,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Sequence
 from app.utils import stable_hash, tokenize
 
 
-REQUIREMENT_VERSION = "carivyo-requirements-2.0.0"
+REQUIREMENT_VERSION = "carivyo-requirements-2.1.0"
 
 # This vocabulary is intentionally a normalization layer, not the boundary of
 # what Carivyo can understand. Unknown requirement text is retained and scored
@@ -124,6 +124,13 @@ _NON_REQUIREMENT_HEADING_RE = re.compile(
     r"equal opportunity|benefits|compensation and benefits|privacy notice)\s*:?$",
     re.IGNORECASE,
 )
+_NON_REQUIREMENT_SEGMENT_RE = re.compile(
+    r"\b(?:equal (?:employment )?opportunity|non-?discrimination|privacy notice|"
+    r"data protection|reasonable accommodation|background check|recruit(?:er|ing|ment)|"
+    r"applicant tracking system|candidate fraud|job scam|do not (?:send|share)|"
+    r"protected characteristic)\b",
+    re.IGNORECASE,
+)
 
 _MATCH_STOP_WORDS = {
     "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "have",
@@ -204,6 +211,13 @@ def extract_requirements(text: str) -> List[Dict[str, Any]]:
         normalized = re.sub(r"\s+", " ", segment).strip()
         key = normalized.casefold()
         if key in seen:
+            continue
+        # Careers pages often append recruiting, privacy, and fraud notices
+        # without a heading. They can contain words such as "required" or
+        # "experience", but are not candidate requirements and must never be
+        # reported as an ATS gap or resume-tailoring demand.
+        if _NON_REQUIREMENT_SEGMENT_RE.search(normalized):
+            seen.add(key)
             continue
         technologies = extract_catalog_terms(normalized, TECHNOLOGY_ALIASES)
         soft_skills = extract_catalog_terms(normalized, SOFT_SKILL_ALIASES)

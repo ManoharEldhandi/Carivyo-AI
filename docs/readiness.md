@@ -1,6 +1,6 @@
 # Carivyo Readiness Assessment
 
-Assessment date: 2026-07-22
+Assessment date: 2026-09-09
 
 ## Verdict
 
@@ -24,9 +24,14 @@ the local application record.
 - Greenhouse, Lever, Ashby, and SmartRecruiters connectors with pagination,
   explicit completeness metadata, official timestamp semantics, deduplication,
   allowlisted direct links, bounded retries, and source observations.
-- Strict role, location, work-mode, seniority, exclusion, freshness, and source
-  gates before ranking. Carivyo returns an honest zero-result state and never
-  broadens a search without explicit user action.
+- Strict role, source, seniority, exclusion, and clearly incompatible geography
+  gates before ranking. The default desktop queue leads with current,
+  strong/good priority-safe roles; broader verified listings remain available
+  only through an explicit control, with their tradeoffs visible.
+- Ordered job and location priorities, bounded Keep/Hide/Apply feedback
+  learning, a requirement-level "Why this job?" decision view, and opt-in
+  daily/weekly local searches with visible next-run state. Scheduling runs only
+  while Carivyo is open and catches up once on the next start.
 - Persistent compact-memory chat with token estimates, provider-session reuse,
   task-scoped context, explicit runtime/model selection, and AI off until the
   user opts in.
@@ -37,22 +42,27 @@ the local application record.
   association integrity.
 - A deterministic, versioned 27-check ATS diagnostic with advisory AI review
   kept outside the deterministic score.
+- Three frozen one-page resume templates (Balanced, AI engineering, Software
+  engineering), each bound to the exact resume run. The template choice cannot
+  bypass evidence, artifact, ATS, or approval gates.
 - Loopback binding, an ephemeral launch-token exchange, random local session token, origin validation, rate limits,
   outbound URL controls, isolated extraction, strict artifact permissions,
   redacted logs, backup, export, and deletion controls.
-- Responsive React interface with concise product language, keyboard-contained
-  dialogs, mobile navigation, visible loading/error/empty states, and a clear
-  distinction between local storage, provider CLI processing, and fully local
-  Ollama inference.
+- Compact dark desktop interface with keyboard-contained dialogs, visible
+  loading/error/empty states, and a clear distinction between local storage,
+  provider CLI processing, and fully local Ollama inference. The supported
+  product target is a laptop; mobile is deliberately out of scope.
 
 ## Evidence summary
 
-- Backend: 136 tests passed.
-- Frontend: 35 tests passed across 9 files.
-- Production build: 315.32 kB JavaScript (91.57 kB gzip) and 88.25 kB CSS
-  (19.75 kB gzip).
-- Browser journey: completed at desktop and 390 x 844 mobile widths through
-  PDF export and application handoff; zero browser console errors.
+- Backend: 163 tests passed.
+- Frontend: 36 tests passed across 9 files.
+- Production build: 327.33 kB JavaScript (94.96 kB gzip) and 133.44 kB CSS
+  (29.22 kB gzip).
+- Browser journey: the current local desktop build was inspected through Jobs,
+  Profile, the "Why this job?" drawer, and the three-template Resume Studio
+  entry state. The queue showed current priority roles first and kept broader
+  verified results behind an explicit control.
 - Browser axe pass on the completed Resume Studio state: zero WCAG A/AA,
   WCAG 2.1 AA, or WCAG 2.2 AA violations after the scroll/focus correction.
 - Live read-only contract check: representative Greenhouse, Lever, Ashby, and
@@ -85,8 +95,8 @@ the local application record.
   product claim, until an authorized diverse anonymized corpus supports
   category agreement, precision/recall, rank correlation, and score-deviation
   measurements.
-- Every generated variant uses the generic ATS-safe A4 TeX template. Carivyo
-  does not preserve or reconstruct arbitrary imported PDF/DOCX layouts.
+- Every generated variant uses one of three frozen ATS-safe A4 TeX templates.
+  Carivyo does not preserve or reconstruct arbitrary imported PDF/DOCX layouts.
 - Exact in-browser TeX editing requires Tectonic. Without it, the website uses
   a labeled independent PDF fallback and disables source editing for that run.
 - Exported fixture PDFs are visually and text-extraction tested, but the
@@ -101,7 +111,8 @@ the local application record.
   encryption and encrypted backup archives are not implemented.
 - The session model and limiter are for a local single-user process, not a
   hosted multi-user threat model. No multi-device, long-duration, hostile-
-  network, or full assistive-technology certification campaign has run.
+  network, or full assistive-technology certification campaign has run. Mobile
+  layout is intentionally not a release target.
 - A 50-request synthetic concurrent burst measured about 3.0 seconds at p95;
   the single-user local path is fast, but hosted concurrency is not ready.
 - Provider chat returns a completed response after the controlled CLI finishes;
@@ -113,11 +124,11 @@ the local application record.
 
 ## Independent Reality Checker verdict
 
-The final independent review on 2026-07-22 rated the trusted-machine,
-single-user local website **PASS WITH LIMITATIONS** and hosted multi-user
-production **NOT READY**. The passing local evidence is the 136-test backend
-suite, 35-test frontend suite, production build, dependency audits, fresh
-loopback launch, and verified core workflow. The limitations above remain
-release boundaries; in particular, they do not support claims of exhaustive
-live-job coverage, ATS-vendor parity, complete accessibility certification, or
-hosted production readiness.
+The final independent review on 2026-09-09 rates the trusted-machine,
+single-user laptop workspace **PASS WITH LIMITATIONS** and hosted multi-user
+production **NOT READY**. The passing local evidence is the 163-test backend
+suite, 36-test frontend suite, production build, loopback launcher smoke, and
+verified desktop core workflow. The limitations above remain release
+boundaries; in particular, they do not support claims of exhaustive live-job
+coverage, ATS-vendor parity, complete accessibility certification, or hosted
+production readiness.

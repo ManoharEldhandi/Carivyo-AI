@@ -217,13 +217,6 @@ class RuntimeGateway:
             if self.settings.fully_local_mode
             else
             {
-                "provider": "ollama",
-                "model": local_default,
-                "reasoning_effort": "none",
-                "fully_local": bool(self.settings.fully_local_mode),
-            }
-            if local_default
-            else {
                 "provider": "codex",
                 "model": configured_default,
                 "reasoning_effort": "low",
@@ -259,9 +252,9 @@ class RuntimeGateway:
             if fully_local and provider == "auto"
             else provider
             if provider != "auto"
-            else "ollama"
-            if "ollama" in available_providers
             else "codex"
+            if "codex" in available_providers
+            else "ollama"
         )
         if fully_local and resolved_provider != "ollama":
             raise ValueError("Fully local mode requires an installed Ollama model")
@@ -355,7 +348,7 @@ class RuntimeGateway:
             if configured != "auto" and configured in available:
                 selected = configured
             else:
-                selected = "ollama" if "ollama" in available else "codex"
+                selected = "codex" if "codex" in available else "ollama"
         if selected not in available:
             raise RuntimeUnavailable(f"{selected} is not available")
         return selected

@@ -389,8 +389,9 @@ describe("candidate profile editor", () => {
       rules: { "color-contrast": { enabled: false } }
     });
     expect(accessibility.violations).toEqual([]);
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     onProfileRefresh.mockClear();
+    expect(screen.getByLabelText("Target roles priority 1")).toHaveValue("Backend Engineer");
 
     fireEvent.change(screen.getByLabelText("Candidate name (required)"), { target: { value: " " } });
     fireEvent.click(screen.getByRole("button", { name: "Save profile" }));

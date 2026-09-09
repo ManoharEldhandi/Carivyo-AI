@@ -527,3 +527,27 @@ def test_requirement_map_does_not_hide_atomic_gaps():
         "python" in key and "aws" in key
         for key in by_requirement
     )
+
+
+def test_github_verification_only_accepts_direct_repository_urls_in_evidence():
+    sources = ResumeService._github_repository_sources(
+        [
+            {
+                "id": "claim-project",
+                "text": "Source: https://github.com/example/candidate-service.git",
+            },
+            {
+                "id": "claim-profile",
+                "text": "GitHub profile: https://github.com/example",
+            },
+        ]
+    )
+
+    assert sources == [
+        {
+            "owner": "example",
+            "repository": "candidate-service",
+            "url": "https://github.com/example/candidate-service",
+            "claim_id": "claim-project",
+        }
+    ]

@@ -1,4 +1,4 @@
-.PHONY: install setup-enhancv dev backend frontend test test-backend test-frontend build check
+.PHONY: install setup-enhancv dev backend frontend test test-backend test-frontend build local-release check
 
 PYTHON ?= $(shell command -v python3.13 || command -v python3.12 || command -v python3.11 || command -v python3)
 PYPI_INDEX ?= https://pypi.org/simple
@@ -32,6 +32,11 @@ test-frontend:
 
 build:
 	cd frontend && npm run build
+
+# Build the immutable frontend assets and serve them from the one loopback
+# process used for a laptop release. This is intentionally not a hosted mode.
+local-release: build
+	.venv/bin/carivyo start
 
 check: test build
 	.venv/bin/python -m pip check

@@ -71,6 +71,18 @@ def test_company_and_legal_boilerplate_after_requirements_is_excluded():
     assert [item["text"] for item in requirements] == ["Experience with Kubernetes is preferred."]
 
 
+def test_unheaded_recruiting_notice_is_not_reported_as_a_requirement_gap():
+    requirements = extract_requirements(
+        """Responsibilities
+        Build reliable Python services for customers.
+        Our recruiting team may communicate with candidates through our
+        Applicant Tracking System. Do not share sensitive personal information.
+        """
+    )
+
+    assert [item["text"] for item in requirements] == ["Build reliable Python services for customers."]
+
+
 def test_field_aware_matching_distinguishes_demonstrated_from_listed_only():
     requirements = extract_requirements(FULL_JD)
     report = match_requirements(
