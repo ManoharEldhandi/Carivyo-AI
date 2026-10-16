@@ -581,7 +581,7 @@ class RuntimeGateway:
                 str(workspace),
                 prompt,
             ]
-        if Path(command[0]).name not in self.ALLOWED_EXECUTABLES:
+        if not self._is_allowed_runtime_executable(executable_path):
             raise RuntimeUnavailable("Runtime executable is not allowlisted")
         env = {
             "PATH": os.environ.get("PATH", ""),
@@ -662,6 +662,18 @@ class RuntimeGateway:
             self._codex_path = self._codex_executable()
             self._codex_path_resolved = True
         return self._codex_path
+
+    @classmethod
+    def _is_allowed_runtime_executable(cls, executable: Path) -> bool:
+        resolved = executable.resolve()
+        if resolved.name in cls.ALLOWED_EXECUTABLES:
+            return True
+        return (
+            resolved.name == "codex.js"
+            and resolved.parent.name == "bin"
+            and resolved.parent.parent.name == "codex"
+            and resolved.parent.parent.parent.name == "@openai"
+        )
 
     def _codex_models(self) -> Tuple[RuntimeModel, ...]:
         if self._model_catalog is not None:

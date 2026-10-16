@@ -2,7 +2,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BOOTSTRAP_TOKEN="$("$ROOT/.venv/bin/python" -c 'import secrets; print(secrets.token_urlsafe(32))')"
+cd "$ROOT"
+BOOTSTRAP_TOKEN="${CARIVYO_BOOTSTRAP_TOKEN:-$("$ROOT/.venv/bin/python" -c 'import secrets; print(secrets.token_urlsafe(32))')}"
 export CARIVYO_BOOTSTRAP_TOKEN="$BOOTSTRAP_TOKEN"
 export VITE_CARIVYO_BOOTSTRAP_TOKEN="$BOOTSTRAP_TOKEN"
 

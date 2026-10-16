@@ -129,6 +129,37 @@ default and is excluded from Git. Set `CARIVYO_NO_OPEN=1` when browser launch is
 not wanted. Shutdown terminates the complete frontend/backend process trees;
 startup refuses occupied ports instead of silently serving an older bundle.
 
+### Codex Terra demo
+
+For the interview/demo configuration, run:
+
+```bash
+./run-demo.sh
+```
+
+The launcher keeps all Carivyo data local, installs the official Codex CLI into the ignored
+`.carivyo/tools/` directory when it is not already available, and asks for a one-time Codex sign-in
+only when required. It starts the backend and frontend, prints all local URLs, and explicitly
+selects **Codex CLI + GPT-5.6 Terra** for AI work. It does not remove or disable Ollama: choose the
+Fully local option in **Profile > AI runtime** to use an installed on-device Ollama model instead.
+
+The Codex provider receives compact task context through its local CLI session; Carivyo's profile,
+jobs, resumes, artifacts, and SQLite database remain on this machine. The app keeps deterministic
+search, matching, and ATS analysis available even when AI is disabled or unavailable.
+
+For the complete product walkthrough, architecture, technology map, and interview demo script, see
+[docs/DEMO_GUIDE.md](docs/DEMO_GUIDE.md). Generate its shareable PDF with:
+
+```bash
+.venv/bin/python scripts/generate_demo_guide_pdf.py
+```
+
+To return to the resume-submission first screen before a demo, stop Carivyo and run:
+
+```bash
+./reset-demo-data.sh
+```
+
 To build and run the laptop release (the production frontend assets served by
 one loopback-only local process), use:
 

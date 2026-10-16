@@ -114,6 +114,15 @@ def test_newest_codex_binary_is_selected(tmp_path, monkeypatch):
     assert RuntimeGateway._codex_executable() == newer.resolve()
 
 
+def test_official_npm_codex_launcher_is_allowlisted(tmp_path):
+    launcher = tmp_path / "node_modules" / "@openai" / "codex" / "bin" / "codex.js"
+    launcher.parent.mkdir(parents=True)
+    launcher.touch()
+
+    assert RuntimeGateway._is_allowed_runtime_executable(launcher) is True
+    assert RuntimeGateway._is_allowed_runtime_executable(tmp_path / "untrusted-codex.js") is False
+
+
 def test_settings_reject_non_loopback_bind(tmp_path):
     with pytest.raises(ValidationError, match="loopback"):
         Settings(project_root=tmp_path, data_dir=tmp_path / "data", host="0.0.0.0")
